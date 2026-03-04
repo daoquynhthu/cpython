@@ -1905,6 +1905,10 @@ clear_thread_frame(PyThreadState *tstate, _PyInterpreterFrame * frame)
     assert((PyObject **)frame + _PyFrame_GetCode(frame)->co_framesize ==
         tstate->datastack_top);
     assert(frame->frame_obj == NULL || frame->frame_obj->f_frame == frame);
+    PyCodeObject *code = _PyFrame_GetCode(frame);
+    if ((code->co_vault_color & PYVAULT_CODE_COLOR_FLAG) != 0) {
+        tstate->vault_color = frame->vault_prev_color;
+    }
     _PyFrame_ClearExceptCode(frame);
     PyStackRef_CLEAR(frame->f_executable);
     _PyThreadState_PopFrame(tstate, frame);
@@ -1914,6 +1918,10 @@ static void
 clear_gen_frame(PyThreadState *tstate, _PyInterpreterFrame * frame)
 {
     assert(frame->owner == FRAME_OWNED_BY_GENERATOR);
+    PyCodeObject *code = _PyFrame_GetCode(frame);
+    if ((code->co_vault_color & PYVAULT_CODE_COLOR_FLAG) != 0) {
+        tstate->vault_color = frame->vault_prev_color;
+    }
     PyGenObject *gen = _PyGen_GetGeneratorFromFrame(frame);
     gen->gi_frame_state = FRAME_CLEARED;
     assert(tstate->exc_info == &gen->gi_exc_state);

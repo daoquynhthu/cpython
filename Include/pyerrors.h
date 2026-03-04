@@ -182,6 +182,25 @@ PyAPI_FUNC(PyObject *) PyErr_Format(
     const char *format,   /* ASCII-encoded string  */
     ...
     );
+
+PyAPI_FUNC(void) PyVault_Enable(void);
+PyAPI_FUNC(int) PyVault_CheckAccessColor(PyObject *op, unsigned short current_color);
+
+#define PyVault_CHECK_ACCESS(op, tstate) \
+    do { \
+        unsigned short _pyvault_color = (tstate) ? (unsigned short)(tstate)->vault_color : 0; \
+        if (!PyVault_CheckAccessColor((op), _pyvault_color)) { \
+            return NULL; \
+        } \
+    } while (0)
+
+#define PyVault_CHECK_ACCESS_JUMP(op, tstate, label) \
+    do { \
+        unsigned short _pyvault_color = (tstate) ? (unsigned short)(tstate)->vault_color : 0; \
+        if (!PyVault_CheckAccessColor((op), _pyvault_color)) { \
+            goto label; \
+        } \
+    } while (0)
 #if !defined(Py_LIMITED_API) || Py_LIMITED_API+0 >= 0x03050000
 PyAPI_FUNC(PyObject *) PyErr_FormatV(
     PyObject *exception,

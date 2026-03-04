@@ -6073,10 +6073,27 @@ static PyType_Spec comerror_spec = {
 
 #endif  // MS_WIN32
 
+static inline int
+pyvault_ctypes_allow_raw_access(void)
+{
+    PyThreadState *tstate = _PyThreadState_GET();
+    unsigned short current_color = tstate ? tstate->vault_color : 0;
+    if (current_color != 0) {
+        PyErr_Format(PyExc_PermissionError,
+                     "PyVault: Security violation! Accessing raw memory from context with color %u",
+                     (unsigned int)current_color);
+        return 0;
+    }
+    return 1;
+}
+
 static PyObject *
 string_at(const char *ptr, int size)
 {
     if (PySys_Audit("ctypes.string_at", "ni", (Py_ssize_t)ptr, size) < 0) {
+        return NULL;
+    }
+    if (!pyvault_ctypes_allow_raw_access()) {
         return NULL;
     }
     if (size == -1)
@@ -6194,6 +6211,9 @@ wstring_at(const wchar_t *ptr, int size)
     if (PySys_Audit("ctypes.wstring_at", "nn", (Py_ssize_t)ptr, ssize) < 0) {
         return NULL;
     }
+    if (!pyvault_ctypes_allow_raw_access()) {
+        return NULL;
+    }
     if (ssize == -1)
         ssize = wcslen(ptr);
     return PyUnicode_FromWideChar(ptr, ssize);
@@ -6204,6 +6224,9 @@ memoryview_at(void *ptr, Py_ssize_t size, int readonly)
 {
     if (PySys_Audit("ctypes.memoryview_at", "nni",
                     (Py_ssize_t)ptr, size, readonly) < 0) {
+        return NULL;
+    }
+    if (!pyvault_ctypes_allow_raw_access()) {
         return NULL;
     }
     if (size < 0) {

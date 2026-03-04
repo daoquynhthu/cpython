@@ -434,6 +434,11 @@ PyObject_GetBuffer(PyObject *obj, Py_buffer *view, int flags)
             return -1;
         }
     }
+    PyThreadState *tstate = _PyThreadState_GET();
+    unsigned short current_color = tstate ? tstate->vault_color : 0;
+    if (!PyVault_CheckAccessColor(obj, current_color)) {
+        return -1;
+    }
     PyBufferProcs *pb = Py_TYPE(obj)->tp_as_buffer;
 
     if (pb == NULL || pb->bf_getbuffer == NULL) {

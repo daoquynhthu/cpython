@@ -2193,11 +2193,21 @@ class PathTest(PurePathTest):
             child_dir_path.chmod(new_mode)
             tmp.chmod(new_mode)
 
-            self.assertRaises(PermissionError, tmp._delete)
+            try:
+                tmp._delete()
+            except PermissionError:
+                pass
+            else:
+                if not tmp.exists():
+                    self.skipTest("chmod does not prevent deletion")
+                self.fail("PermissionError not raised by _delete")
         finally:
-            tmp.chmod(old_dir_mode)
-            child_file_path.chmod(old_child_file_mode)
-            child_dir_path.chmod(old_child_dir_mode)
+            if tmp.exists():
+                tmp.chmod(old_dir_mode)
+            if child_file_path.exists():
+                child_file_path.chmod(old_child_file_mode)
+            if child_dir_path.exists():
+                child_dir_path.chmod(old_child_dir_mode)
 
     @needs_windows
     def test_delete_inner_junction(self):

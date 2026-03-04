@@ -1481,6 +1481,7 @@ reset_threadstate(_PyThreadStateImpl *tstate)
     memcpy(tstate,
            &initial._main_interpreter._initial_thread,
            sizeof(*tstate));
+    tstate->base.vault_color = 0;
 }
 
 static _PyThreadStateImpl *
@@ -1578,6 +1579,8 @@ init_threadstate(_PyThreadStateImpl *_tstate,
     tstate->what_event = -1;
     tstate->current_executor = NULL;
     tstate->dict_global_version = 0;
+
+    tstate->vault_color = 0;
 
     _tstate->c_stack_soft_limit = UINTPTR_MAX;
     _tstate->c_stack_top = 0;

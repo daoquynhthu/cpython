@@ -28,6 +28,8 @@ extern const char *_PyUOpName(int index);
  * InternalDocs/interpreter.md `Specialization` section.
  */
 
+uint16_t _Py_jump_backoff_initial_value = JUMP_BACKWARD_INITIAL_VALUE;
+
 #ifdef Py_STATS
 GCStats _py_gc_stats[NUM_GENERATIONS] = { 0 };
 static PyStats _Py_stats_struct = { .gc_stats = _py_gc_stats };

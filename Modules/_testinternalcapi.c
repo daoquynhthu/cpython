@@ -1244,6 +1244,34 @@ invalidate_executors(PyObject *self, PyObject *obj)
     Py_RETURN_NONE;
 }
 
+static PyObject *
+get_executor_exits(PyObject *self, PyObject *obj)
+{
+    if (!PyObject_TypeCheck(obj, &_PyUOpExecutor_Type)) {
+        PyErr_SetString(PyExc_TypeError, "expected executor");
+        return NULL;
+    }
+    _PyExecutorObject *executor = (_PyExecutorObject *)obj;
+    PyObject *list = PyList_New(executor->exit_count);
+    if (list == NULL) {
+        return NULL;
+    }
+    for (uint32_t i = 0; i < executor->exit_count; i++) {
+        _PyExitData *exit = &executor->exits[i];
+        PyObject *item = PyTuple_New(4);
+        if (item == NULL) {
+            Py_DECREF(list);
+            return NULL;
+        }
+        PyTuple_SET_ITEM(item, 0, PyLong_FromUnsignedLong(exit->target));
+        PyTuple_SET_ITEM(item, 1, PyLong_FromUnsignedLong(exit->hot_count));
+        PyTuple_SET_ITEM(item, 2, PyLong_FromLong(exit->patched));
+        PyTuple_SET_ITEM(item, 3, PyLong_FromLong(exit->executor != NULL));
+        PyList_SET_ITEM(list, i, item);
+    }
+    return list;
+}
+
 #endif
 
 static int _pending_callback(void *arg)
@@ -2563,6 +2591,7 @@ static PyMethodDef module_functions[] = {
 #endif
 #ifdef _Py_TIER2
     {"uop_symbols_test", _Py_uop_symbols_test, METH_NOARGS},
+    {"get_executor_exits", get_executor_exits, METH_O, NULL},
 #endif
     GH_119213_GETARGS_METHODDEF
     {"get_static_builtin_types", get_static_builtin_types, METH_NOARGS},
@@ -2630,6 +2659,16 @@ module_exec(PyObject *module)
 
     if (PyModule_Add(module, "TIER2_THRESHOLD",
                         PyLong_FromLong(JUMP_BACKWARD_INITIAL_VALUE + 1)) < 0) {
+        return 1;
+    }
+
+    if (PyModule_Add(module, "JIT_HOT_BACKEDGE_THRESHOLD",
+                        PyLong_FromLong(_PY_JIT_HOT_BACKEDGE_THRESHOLD)) < 0) {
+        return 1;
+    }
+
+    if (PyModule_Add(module, "JIT_HOT_EXIT_THRESHOLD",
+                        PyLong_FromLong(_PY_JIT_HOT_EXIT_THRESHOLD)) < 0) {
         return 1;
     }
 

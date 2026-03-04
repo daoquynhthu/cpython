@@ -1214,7 +1214,10 @@ class PathFinder:
         # https://bugs.python.org/issue45703
         _NamespacePath._epoch += 1
 
-        from importlib.metadata import MetadataPathFinder
+        try:
+            from importlib.metadata import MetadataPathFinder
+        except ModuleNotFoundError:
+            return
         MetadataPathFinder.invalidate_caches()
 
     @staticmethod

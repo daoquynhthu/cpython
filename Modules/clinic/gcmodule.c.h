@@ -288,6 +288,24 @@ gc_get_threshold(PyObject *module, PyObject *Py_UNUSED(ignored))
     return gc_get_threshold_impl(module);
 }
 
+PyDoc_STRVAR(gc_get_threshold_stats__doc__,
+"get_threshold_stats($module, /)\n"
+"--\n"
+"\n"
+"Return a dictionary describing collection thresholds and trigger state.");
+
+#define GC_GET_THRESHOLD_STATS_METHODDEF    \
+    {"get_threshold_stats", (PyCFunction)gc_get_threshold_stats, METH_NOARGS, gc_get_threshold_stats__doc__},
+
+static PyObject *
+gc_get_threshold_stats_impl(PyObject *module);
+
+static PyObject *
+gc_get_threshold_stats(PyObject *module, PyObject *Py_UNUSED(ignored))
+{
+    return gc_get_threshold_stats_impl(module);
+}
+
 PyDoc_STRVAR(gc_get_count__doc__,
 "get_count($module, /)\n"
 "--\n"

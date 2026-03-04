@@ -849,7 +849,7 @@ class CommandLineTests(unittest.TestCase):
         cmd_args = []
         if sys.flags.no_user_site:
             cmd_args.append("-s")
-        cmd_args.extend(["-m", "site", *args])
+        cmd_args.extend(["-X", "utf8", "-m", "site", *args])
 
         with EnvironmentVarGuard() as env:
             env["PYTHONUTF8"] = "1"

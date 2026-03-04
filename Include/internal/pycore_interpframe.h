@@ -199,6 +199,10 @@ _PyFrame_Initialize(
     frame->instr_ptr = _PyCode_CODE(code);
 #endif
     frame->return_offset = 0;
+    frame->vault_prev_color = tstate->vault_color;
+    if ((code->co_vault_color & PYVAULT_CODE_COLOR_FLAG) != 0) {
+        tstate->vault_color = (uint16_t)(code->co_vault_color & PYVAULT_CODE_COLOR_MASK);
+    }
     frame->owner = FRAME_OWNED_BY_THREAD;
     frame->visited = 0;
 #ifdef Py_DEBUG

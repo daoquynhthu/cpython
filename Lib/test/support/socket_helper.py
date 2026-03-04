@@ -9,9 +9,9 @@ import unittest
 
 from .. import support
 
-HOST = "localhost"
 HOSTv4 = "127.0.0.1"
 HOSTv6 = "::1"
+HOST = HOSTv4 if support.MS_WINDOWS else "localhost"
 
 # WASI SDK 15.0 does not provide gethostname, stub raises OSError ENOTSUP.
 has_gethostname = not support.is_wasi

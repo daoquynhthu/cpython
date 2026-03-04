@@ -5,6 +5,7 @@
  */
 
 #include "Python.h"
+#include "pycore_ceval.h"
 #include "pycore_gc.h"
 #include "pycore_object.h"      // _PyObject_IS_GC()
 #include "pycore_pystate.h"     // _PyInterpreterState_GET()
@@ -183,7 +184,132 @@ gc_get_threshold_impl(PyObject *module)
     return Py_BuildValue("(iii)",
                          gcstate->young.threshold,
                          gcstate->old[0].threshold,
-                         0);
+                         gcstate->old[1].threshold);
+}
+
+/*[clinic input]
+gc.get_threshold_stats
+
+Return a dictionary describing collection thresholds and trigger state.
+[clinic start generated code]*/
+
+static PyObject *
+gc_get_threshold_stats_impl(PyObject *module)
+/*[clinic end generated code: output=0b28d2b21dd0c5d8 input=6d88c1e1d9f3d46b]*/
+{
+    GCState *gcstate = get_gc_state();
+    PyThreadState *tstate = _PyThreadState_GET();
+    PyObject *result = PyDict_New();
+    if (result == NULL) {
+        return NULL;
+    }
+    PyObject *thresholds = Py_BuildValue("(iii)",
+                                         gcstate->young.threshold,
+                                         gcstate->old[0].threshold,
+                                         gcstate->old[1].threshold);
+    if (thresholds == NULL) {
+        Py_DECREF(result);
+        return NULL;
+    }
+    if (PyDict_SetItemString(result, "thresholds", thresholds) < 0) {
+        Py_DECREF(thresholds);
+        Py_DECREF(result);
+        return NULL;
+    }
+    Py_DECREF(thresholds);
+    PyObject *counts = Py_BuildValue("(nnn)",
+                                     gcstate->young.count,
+                                     gcstate->old[0].count,
+                                     gcstate->old[1].count);
+    if (counts == NULL) {
+        Py_DECREF(result);
+        return NULL;
+    }
+    if (PyDict_SetItemString(result, "counts", counts) < 0) {
+        Py_DECREF(counts);
+        Py_DECREF(result);
+        return NULL;
+    }
+    Py_DECREF(counts);
+    PyObject *enabled = PyBool_FromLong((long)gcstate->enabled);
+    if (enabled == NULL) {
+        Py_DECREF(result);
+        return NULL;
+    }
+    if (PyDict_SetItemString(result, "enabled", enabled) < 0) {
+        Py_DECREF(enabled);
+        Py_DECREF(result);
+        return NULL;
+    }
+    Py_DECREF(enabled);
+    PyObject *collecting = PyBool_FromLong((long)gcstate->collecting);
+    if (collecting == NULL) {
+        Py_DECREF(result);
+        return NULL;
+    }
+    if (PyDict_SetItemString(result, "collecting", collecting) < 0) {
+        Py_DECREF(collecting);
+        Py_DECREF(result);
+        return NULL;
+    }
+    Py_DECREF(collecting);
+    int scheduled = _Py_eval_breaker_bit_is_set(tstate, _PY_GC_SCHEDULED_BIT);
+    PyObject *scheduled_obj = PyBool_FromLong((long)scheduled);
+    if (scheduled_obj == NULL) {
+        Py_DECREF(result);
+        return NULL;
+    }
+    if (PyDict_SetItemString(result, "scheduled", scheduled_obj) < 0) {
+        Py_DECREF(scheduled_obj);
+        Py_DECREF(result);
+        return NULL;
+    }
+    Py_DECREF(scheduled_obj);
+    PyObject *heap_size = PyLong_FromSsize_t(gcstate->heap_size);
+    if (heap_size == NULL) {
+        Py_DECREF(result);
+        return NULL;
+    }
+    if (PyDict_SetItemString(result, "heap_size", heap_size) < 0) {
+        Py_DECREF(heap_size);
+        Py_DECREF(result);
+        return NULL;
+    }
+    Py_DECREF(heap_size);
+    PyObject *work_to_do = PyLong_FromSsize_t(gcstate->work_to_do);
+    if (work_to_do == NULL) {
+        Py_DECREF(result);
+        return NULL;
+    }
+    if (PyDict_SetItemString(result, "work_to_do", work_to_do) < 0) {
+        Py_DECREF(work_to_do);
+        Py_DECREF(result);
+        return NULL;
+    }
+    Py_DECREF(work_to_do);
+    PyObject *visited_space = PyLong_FromLong((long)gcstate->visited_space);
+    if (visited_space == NULL) {
+        Py_DECREF(result);
+        return NULL;
+    }
+    if (PyDict_SetItemString(result, "visited_space", visited_space) < 0) {
+        Py_DECREF(visited_space);
+        Py_DECREF(result);
+        return NULL;
+    }
+    Py_DECREF(visited_space);
+    PyObject *phase = PyLong_FromLong((long)gcstate->phase);
+    if (phase == NULL) {
+        Py_DECREF(result);
+        return NULL;
+    }
+    if (PyDict_SetItemString(result, "phase", phase) < 0) {
+        Py_DECREF(phase);
+        Py_DECREF(result);
+        return NULL;
+    }
+    Py_DECREF(phase);
+    return result;
 }
 
 /*[clinic input]
@@ -477,6 +603,7 @@ PyDoc_STRVAR(gc__doc__,
 "get_debug() -- Get debugging flags.\n"
 "set_threshold() -- Set the collection thresholds.\n"
 "get_threshold() -- Return the current collection thresholds.\n"
+"get_threshold_stats() -- Return thresholds and trigger state.\n"
 "get_objects() -- Return a list of all objects tracked by the collector.\n"
 "is_tracked() -- Returns true if a given object is tracked.\n"
 "is_finalized() -- Returns true if a given object has been already finalized.\n"
@@ -495,6 +622,7 @@ static PyMethodDef GcMethods[] = {
     GC_GET_COUNT_METHODDEF
     GC_SET_THRESHOLD_METHODDEF
     GC_GET_THRESHOLD_METHODDEF
+    GC_GET_THRESHOLD_STATS_METHODDEF
     GC_COLLECT_METHODDEF
     GC_GET_OBJECTS_METHODDEF
     GC_GET_STATS_METHODDEF

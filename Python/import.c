@@ -4,6 +4,7 @@
 #include "pycore_audit.h"         // _PySys_Audit()
 #include "pycore_ceval.h"
 #include "pycore_critical_section.h"  // Py_BEGIN_CRITICAL_SECTION()
+#include "pycore_dict.h"          // _PyDict_GetKeysVersionForCurrentState()
 #include "pycore_hashtable.h"     // _Py_hashtable_new_full()
 #include "pycore_import.h"        // _PyImport_BootstrapImp()
 #include "pycore_initconfig.h"    // _PyStatus_OK()
@@ -301,6 +302,12 @@ PyImport_GetModule(PyObject *name)
             remove_importlib_frames(tstate);
             return NULL;
         }
+        unsigned short current_color = tstate ? tstate->vault_color : 0;
+        if (!PyVault_CheckAccessColor(mod, current_color)) {
+            Py_DECREF(mod);
+            remove_importlib_frames(tstate);
+            return NULL;
+        }
     }
     return mod;
 }
@@ -356,6 +363,13 @@ PyImport_AddModuleRef(const char *name)
     PyThreadState *tstate = _PyThreadState_GET();
     PyObject *module = import_add_module(tstate, name_obj);
     Py_DECREF(name_obj);
+    if (module != NULL) {
+        unsigned short current_color = tstate ? tstate->vault_color : 0;
+        if (!PyVault_CheckAccessColor(module, current_color)) {
+            Py_DECREF(module);
+            return NULL;
+        }
+    }
     return module;
 }
 
@@ -366,6 +380,11 @@ PyImport_AddModuleObject(PyObject *name)
     PyThreadState *tstate = _PyThreadState_GET();
     PyObject *mod = import_add_module(tstate, name);
     if (!mod) {
+        return NULL;
+    }
+    unsigned short current_color = tstate ? tstate->vault_color : 0;
+    if (!PyVault_CheckAccessColor(mod, current_color)) {
+        Py_DECREF(mod);
         return NULL;
     }
 
@@ -3376,6 +3395,68 @@ get_path_importer(PyThreadState *tstate, PyObject *path_importer_cache,
     return importer;
 }
 
+static int
+path_importer_cache_fast_path(PyInterpreterState *interp,
+                              PyObject *path_importer_cache,
+                              PyObject *path,
+                              PyObject **importer)
+{
+    if (interp->imports.path_importer_cache == NULL
+        || interp->imports.path_importer_cache != path_importer_cache) {
+        return 0;
+    }
+    if (interp->imports.path_importer_cache_key == NULL
+        || interp->imports.path_importer_cache_value == NULL) {
+        return 0;
+    }
+    if (!PyDict_CheckExact(path_importer_cache)) {
+        return 0;
+    }
+    uint32_t version = _PyDict_GetKeysVersionForCurrentState(
+            interp, (PyDictObject *)path_importer_cache);
+    if (version == 0 || version != interp->imports.path_importer_cache_version) {
+        return 0;
+    }
+    int equal = PyObject_RichCompareBool(
+            path, interp->imports.path_importer_cache_key, Py_EQ);
+    if (equal < 0) {
+        return -1;
+    }
+    if (!equal) {
+        return 0;
+    }
+    *importer = Py_NewRef(interp->imports.path_importer_cache_value);
+    return 1;
+}
+
+static void
+path_importer_cache_update(PyInterpreterState *interp,
+                           PyObject *path_importer_cache,
+                           PyObject *path,
+                           PyObject *importer)
+{
+    if (interp->imports.path_importer_cache != path_importer_cache) {
+        Py_XSETREF(interp->imports.path_importer_cache,
+                   Py_NewRef(path_importer_cache));
+        Py_CLEAR(interp->imports.path_importer_cache_key);
+        Py_CLEAR(interp->imports.path_importer_cache_value);
+        interp->imports.path_importer_cache_version = 0;
+    }
+    if (path == NULL || importer == NULL) {
+        return;
+    }
+    Py_XSETREF(interp->imports.path_importer_cache_key, Py_NewRef(path));
+    Py_XSETREF(interp->imports.path_importer_cache_value, Py_NewRef(importer));
+    if (PyDict_CheckExact(path_importer_cache)) {
+        uint32_t version = _PyDict_GetKeysVersionForCurrentState(
+                interp, (PyDictObject *)path_importer_cache);
+        interp->imports.path_importer_cache_version = (version != 0) ? version : 0;
+    }
+    else {
+        interp->imports.path_importer_cache_version = 0;
+    }
+}
+
 PyObject *
 PyImport_GetImporter(PyObject *path)
 {
@@ -3389,7 +3470,23 @@ PyImport_GetImporter(PyObject *path)
         Py_DECREF(path_importer_cache);
         return NULL;
     }
-    PyObject *importer = get_path_importer(tstate, path_importer_cache, path_hooks, path);
+    PyObject *importer = NULL;
+    int cached = path_importer_cache_fast_path(
+            tstate->interp, path_importer_cache, path, &importer);
+    if (cached < 0) {
+        Py_DECREF(path_hooks);
+        Py_DECREF(path_importer_cache);
+        return NULL;
+    }
+    if (cached > 0) {
+        Py_DECREF(path_hooks);
+        Py_DECREF(path_importer_cache);
+        return importer;
+    }
+    importer = get_path_importer(tstate, path_importer_cache, path_hooks, path);
+    if (importer != NULL) {
+        path_importer_cache_update(tstate->interp, path_importer_cache, path, importer);
+    }
     Py_DECREF(path_hooks);
     Py_DECREF(path_importer_cache);
     return importer;
@@ -3895,6 +3992,14 @@ PyImport_ImportModuleLevelObject(PyObject *name, PyObject *globals,
         }
     }
 
+    if (final_mod != NULL) {
+        unsigned short current_color = tstate ? tstate->vault_color : 0;
+        if (!PyVault_CheckAccessColor(final_mod, current_color)) {
+            Py_DECREF(final_mod);
+            final_mod = NULL;
+        }
+    }
+
   error:
     Py_XDECREF(abs_name);
     Py_XDECREF(mod);
@@ -4111,6 +4216,10 @@ _PyImport_ClearCore(PyInterpreterState *interp)
     Py_CLEAR(MODULES_BY_INDEX(interp));
     Py_CLEAR(IMPORTLIB(interp));
     Py_CLEAR(IMPORT_FUNC(interp));
+    Py_CLEAR(interp->imports.path_importer_cache);
+    Py_CLEAR(interp->imports.path_importer_cache_key);
+    Py_CLEAR(interp->imports.path_importer_cache_value);
+    interp->imports.path_importer_cache_version = 0;
 }
 
 void

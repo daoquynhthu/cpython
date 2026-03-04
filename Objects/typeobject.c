@@ -5712,6 +5712,9 @@ is_dunder_name(PyObject *name)
 static PyObject *
 update_cache(struct type_cache_entry *entry, PyObject *name, unsigned int version_tag, PyObject *value)
 {
+    if (entry->name == name && entry->value == value && entry->version == version_tag) {
+        return Py_NewRef(entry->name);
+    }
     _Py_atomic_store_ptr_relaxed(&entry->value, value); /* borrowed */
     assert(_PyASCIIObject_CAST(name)->hash != -1);
     OBJECT_STAT_INC_COND(type_cache_collisions, entry->name != Py_None && entry->name != name);

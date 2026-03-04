@@ -34,6 +34,17 @@ typedef struct {
     char debugger_script_path[_Py_MAX_SCRIPT_PATH_SIZE];
 } _PyRemoteDebuggerSupport;
 
+#define _PY_JIT_HOT_BACKEDGE_CACHE_SIZE 8
+#define _PY_JIT_HOT_BACKEDGE_THRESHOLD 64
+#define _PY_JIT_HOT_EXIT_THRESHOLD 32
+
+typedef struct {
+    uintptr_t code;
+    uint32_t offset;
+    uint16_t hits;
+    uint16_t pad;
+} _PyHotBackedgeEntry;
+
 typedef struct _err_stackitem {
     /* This struct represents a single execution context where we might
      * be currently handling an exception.  It is a per-coroutine state
@@ -177,6 +188,9 @@ struct _ts {
     /* Unique thread state id. */
     uint64_t id;
 
+    /* PyVault: Current execution security color */
+    uint16_t vault_color;
+
     _PyStackChunk *datastack_chunk;
     PyObject **datastack_top;
     PyObject **datastack_limit;
@@ -195,6 +209,9 @@ struct _ts {
 
     /* The thread's exception stack entry.  (Always the last entry.) */
     _PyErr_StackItem exc_state;
+
+    _PyHotBackedgeEntry jit_hot_backedges[_PY_JIT_HOT_BACKEDGE_CACHE_SIZE];
+    uint8_t jit_hot_backedges_pos;
 
     PyObject *current_executor;
 

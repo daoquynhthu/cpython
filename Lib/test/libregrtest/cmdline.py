@@ -1,5 +1,5 @@
 import argparse
-import os.path
+import os
 import shlex
 import sys
 from test.support import os_helper, Py_DEBUG
@@ -438,6 +438,12 @@ def resources_list(string):
 def priority_list(string):
     return string.split(",")
 
+def _default_parallel() -> int:
+    count = os.cpu_count()
+    if count is None:
+        count = 16
+    return max(16, count)
+
 
 def _parse_args(args, **kwargs):
     # Defaults
@@ -469,8 +475,6 @@ def _parse_args(args, **kwargs):
 
     # Continuous Integration (CI): common options for fast/slow CI modes
     if ns.slow_ci or ns.fast_ci:
-        # Similar to options:
-        #   -j0 --randomize --fail-env-changed --rerun --slowest --verbose3
         if ns.use_mp is None:
             ns.use_mp = 0
         ns.randomize = True
@@ -486,8 +490,14 @@ def _parse_args(args, **kwargs):
     else:
         ns._add_python_opts = False
 
+    use_mp_default = ns.use_mp is None
+    if use_mp_default:
+        ns.use_mp = _default_parallel()
+
     # --singleprocess overrides -jN option
     if ns.single_process:
+        ns.use_mp = None
+    if ns.forever and use_mp_default:
         ns.use_mp = None
 
     # When both --slow-ci and --fast-ci options are present,
@@ -510,10 +520,12 @@ def _parse_args(args, **kwargs):
     if ns.single and ns.fromfile:
         parser.error("-s and -f don't go together!")
     if ns.trace:
-        if ns.use_mp is not None:
-            if not Py_DEBUG:
+        if ns.use_mp is not None and not Py_DEBUG:
+            if use_mp_default:
+                ns.use_mp = None
+            else:
                 parser.error("need --with-pydebug to use -T and -j together")
-        else:
+        if ns.use_mp is None:
             print(
                 "Warning: collecting coverage without -j is imprecise. Configure"
                 " --with-pydebug and run -m test -T -j for best results.",
@@ -562,7 +574,7 @@ def _parse_args(args, **kwargs):
     # When -jN option is used, a worker process does not use --verbose3
     # and so -R 3:3 -jN --verbose3 just works as expected: there is no false
     # alarm about memory leak.
-    if ns.huntrleaks and ns.verbose3 and ns.use_mp is None:
+    if ns.huntrleaks and ns.verbose3 and (ns.use_mp is None or use_mp_default):
         # run_single_test() replaces sys.stdout with io.StringIO if verbose3
         # is true. In this case, huntrleaks sees an write into StringIO as
         # a memory leak, whereas it is not (gh-71290).

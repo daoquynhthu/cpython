@@ -5239,6 +5239,12 @@
             _PyStackRef owner;
             owner = stack_pointer[-1];
             PyObject *name = GETITEM(FRAME_CO_NAMES, oparg);
+            if (!PyStackRef_IsNullOrInt(owner)) {
+                unsigned short current_color = tstate ? tstate->vault_color : 0;
+                if (!PyVault_CheckAccessColor(PyStackRef_AsPyObjectBorrow(owner), current_color)) {
+                    JUMP_TO_LABEL(error);
+                }
+            }
             _PyFrame_SetStackPointer(frame, stack_pointer);
             int err = PyObject_DelAttr(PyStackRef_AsPyObjectBorrow(owner), name);
             stack_pointer = _PyFrame_GetStackPointer(frame);
@@ -7234,6 +7240,10 @@
                 PyObject *global_super = PyStackRef_AsPyObjectBorrow(global_super_st);
                 PyObject *class = PyStackRef_AsPyObjectBorrow(class_st);
                 PyObject *self = PyStackRef_AsPyObjectBorrow(self_st);
+                unsigned short current_color = tstate ? tstate->vault_color : 0;
+                if (!PyVault_CheckAccessColor(self, current_color)) {
+                    JUMP_TO_LABEL(error);
+                }
                 if (opcode == INSTRUMENTED_LOAD_SUPER_ATTR) {
                     PyObject *arg = oparg & 2 ? class : &_PyInstrumentation_MISSING;
                     _PyFrame_SetStackPointer(frame, stack_pointer);
@@ -7654,6 +7664,10 @@
                 gen->gi_exc_state.previous_item = NULL;
                 _Py_LeaveRecursiveCallPy(tstate);
                 _PyInterpreterFrame *gen_frame = frame;
+                PyCodeObject *gen_code = _PyFrame_GetCode(gen_frame);
+                if ((gen_code->co_vault_color & PYVAULT_CODE_COLOR_FLAG) != 0) {
+                    tstate->vault_color = gen_frame->vault_prev_color;
+                }
                 frame = tstate->current_frame = frame->previous;
                 gen_frame->previous = NULL;
                 assert(INLINE_CACHE_ENTRIES_SEND == INLINE_CACHE_ENTRIES_FOR_ITER);
@@ -8011,6 +8025,18 @@
                 #endif  /* ENABLE_SPECIALIZATION_FT */
             }
             /* Skip 8 cache entries */
+            // _PYVAULT_CHECK_ACCESS
+            {
+                if (!PyStackRef_IsNullOrInt(owner)) {
+                    PyObject *owner_o = PyStackRef_AsPyObjectBorrow(owner);
+                    if (PyVault_GET_OBJ_TAG(owner_o) != 0) {
+                        unsigned short current_color = tstate ? tstate->vault_color : 0;
+                        if (!PyVault_CheckAccessColor(owner_o, current_color)) {
+                            JUMP_TO_LABEL(error);
+                        }
+                    }
+                }
+            }
             // _LOAD_ATTR
             {
                 self_or_null = &stack_pointer[0];
@@ -8092,6 +8118,18 @@
                     JUMP_TO_PREDICTED(LOAD_ATTR);
                 }
             }
+            // _PYVAULT_CHECK_ACCESS
+            {
+                if (!PyStackRef_IsNullOrInt(owner)) {
+                    PyObject *owner_o = PyStackRef_AsPyObjectBorrow(owner);
+                    if (PyVault_GET_OBJ_TAG(owner_o) != 0) {
+                        unsigned short current_color = tstate ? tstate->vault_color : 0;
+                        if (!PyVault_CheckAccessColor(owner_o, current_color)) {
+                            JUMP_TO_LABEL(error);
+                        }
+                    }
+                }
+            }
             /* Skip 2 cache entries */
             // _LOAD_ATTR_CLASS
             {
@@ -8161,6 +8199,18 @@
                     JUMP_TO_PREDICTED(LOAD_ATTR);
                 }
             }
+            // _PYVAULT_CHECK_ACCESS
+            {
+                if (!PyStackRef_IsNullOrInt(owner)) {
+                    PyObject *owner_o = PyStackRef_AsPyObjectBorrow(owner);
+                    if (PyVault_GET_OBJ_TAG(owner_o) != 0) {
+                        unsigned short current_color = tstate ? tstate->vault_color : 0;
+                        if (!PyVault_CheckAccessColor(owner_o, current_color)) {
+                            JUMP_TO_LABEL(error);
+                        }
+                    }
+                }
+            }
             // _LOAD_ATTR_CLASS
             {
                 PyObject *descr = read_obj(&this_instr[6].cache);
@@ -8204,6 +8254,12 @@
             uint32_t func_version = read_u32(&this_instr[4].cache);
             PyObject *getattribute = read_obj(&this_instr[6].cache);
             PyObject *owner_o = PyStackRef_AsPyObjectBorrow(owner);
+            if (!PyStackRef_IsNullOrInt(owner)) {
+                unsigned short current_color = tstate ? tstate->vault_color : 0;
+                if (!PyVault_CheckAccessColor(owner_o, current_color)) {
+                    JUMP_TO_LABEL(error);
+                }
+            }
             assert((oparg & 1) == 0);
             if (tstate->interp->eval_frame) {
                 UPDATE_MISS_STATS(LOAD_ATTR);
@@ -8280,6 +8336,18 @@
                     UPDATE_MISS_STATS(LOAD_ATTR);
                     assert(_PyOpcode_Deopt[opcode] == (LOAD_ATTR));
                     JUMP_TO_PREDICTED(LOAD_ATTR);
+                }
+            }
+            // _PYVAULT_CHECK_ACCESS
+            {
+                if (!PyStackRef_IsNullOrInt(owner)) {
+                    PyObject *owner_o = PyStackRef_AsPyObjectBorrow(owner);
+                    if (PyVault_GET_OBJ_TAG(owner_o) != 0) {
+                        unsigned short current_color = tstate ? tstate->vault_color : 0;
+                        if (!PyVault_CheckAccessColor(owner_o, current_color)) {
+                            JUMP_TO_LABEL(error);
+                        }
+                    }
                 }
             }
             // _LOAD_ATTR_INSTANCE_VALUE
@@ -8362,6 +8430,18 @@
                     JUMP_TO_PREDICTED(LOAD_ATTR);
                 }
             }
+            // _PYVAULT_CHECK_ACCESS
+            {
+                if (!PyStackRef_IsNullOrInt(owner)) {
+                    PyObject *owner_o = PyStackRef_AsPyObjectBorrow(owner);
+                    if (PyVault_GET_OBJ_TAG(owner_o) != 0) {
+                        unsigned short current_color = tstate ? tstate->vault_color : 0;
+                        if (!PyVault_CheckAccessColor(owner_o, current_color)) {
+                            JUMP_TO_LABEL(error);
+                        }
+                    }
+                }
+            }
             /* Skip 1 cache entry */
             // _LOAD_ATTR_METHOD_LAZY_DICT
             {
@@ -8405,6 +8485,18 @@
                     UPDATE_MISS_STATS(LOAD_ATTR);
                     assert(_PyOpcode_Deopt[opcode] == (LOAD_ATTR));
                     JUMP_TO_PREDICTED(LOAD_ATTR);
+                }
+            }
+            // _PYVAULT_CHECK_ACCESS
+            {
+                if (!PyStackRef_IsNullOrInt(owner)) {
+                    PyObject *owner_o = PyStackRef_AsPyObjectBorrow(owner);
+                    if (PyVault_GET_OBJ_TAG(owner_o) != 0) {
+                        unsigned short current_color = tstate ? tstate->vault_color : 0;
+                        if (!PyVault_CheckAccessColor(owner_o, current_color)) {
+                            JUMP_TO_LABEL(error);
+                        }
+                    }
                 }
             }
             /* Skip 2 cache entries */
@@ -8476,6 +8568,18 @@
                     JUMP_TO_PREDICTED(LOAD_ATTR);
                 }
             }
+            // _PYVAULT_CHECK_ACCESS
+            {
+                if (!PyStackRef_IsNullOrInt(owner)) {
+                    PyObject *owner_o = PyStackRef_AsPyObjectBorrow(owner);
+                    if (PyVault_GET_OBJ_TAG(owner_o) != 0) {
+                        unsigned short current_color = tstate ? tstate->vault_color : 0;
+                        if (!PyVault_CheckAccessColor(owner_o, current_color)) {
+                            JUMP_TO_LABEL(error);
+                        }
+                    }
+                }
+            }
             // _LOAD_ATTR_METHOD_WITH_VALUES
             {
                 PyObject *descr = read_obj(&this_instr[6].cache);
@@ -8508,9 +8612,21 @@
             _PyStackRef attr;
             _PyStackRef *null;
             /* Skip 1 cache entry */
-            // _LOAD_ATTR_MODULE
+            // _PYVAULT_CHECK_ACCESS
             {
                 owner = stack_pointer[-1];
+                if (!PyStackRef_IsNullOrInt(owner)) {
+                    PyObject *owner_o = PyStackRef_AsPyObjectBorrow(owner);
+                    if (PyVault_GET_OBJ_TAG(owner_o) != 0) {
+                        unsigned short current_color = tstate ? tstate->vault_color : 0;
+                        if (!PyVault_CheckAccessColor(owner_o, current_color)) {
+                            JUMP_TO_LABEL(error);
+                        }
+                    }
+                }
+            }
+            // _LOAD_ATTR_MODULE
+            {
                 uint32_t dict_version = read_u32(&this_instr[2].cache);
                 uint16_t index = read_u16(&this_instr[4].cache);
                 PyObject *owner_o = PyStackRef_AsPyObjectBorrow(owner);
@@ -8593,6 +8709,18 @@
                     JUMP_TO_PREDICTED(LOAD_ATTR);
                 }
             }
+            // _PYVAULT_CHECK_ACCESS
+            {
+                if (!PyStackRef_IsNullOrInt(owner)) {
+                    PyObject *owner_o = PyStackRef_AsPyObjectBorrow(owner);
+                    if (PyVault_GET_OBJ_TAG(owner_o) != 0) {
+                        unsigned short current_color = tstate ? tstate->vault_color : 0;
+                        if (!PyVault_CheckAccessColor(owner_o, current_color)) {
+                            JUMP_TO_LABEL(error);
+                        }
+                    }
+                }
+            }
             /* Skip 2 cache entries */
             // _LOAD_ATTR_NONDESCRIPTOR_NO_DICT
             {
@@ -8663,6 +8791,18 @@
                     JUMP_TO_PREDICTED(LOAD_ATTR);
                 }
             }
+            // _PYVAULT_CHECK_ACCESS
+            {
+                if (!PyStackRef_IsNullOrInt(owner)) {
+                    PyObject *owner_o = PyStackRef_AsPyObjectBorrow(owner);
+                    if (PyVault_GET_OBJ_TAG(owner_o) != 0) {
+                        unsigned short current_color = tstate ? tstate->vault_color : 0;
+                        if (!PyVault_CheckAccessColor(owner_o, current_color)) {
+                            JUMP_TO_LABEL(error);
+                        }
+                    }
+                }
+            }
             // _LOAD_ATTR_NONDESCRIPTOR_WITH_VALUES
             {
                 PyObject *descr = read_obj(&this_instr[6].cache);
@@ -8714,6 +8854,18 @@
                     UPDATE_MISS_STATS(LOAD_ATTR);
                     assert(_PyOpcode_Deopt[opcode] == (LOAD_ATTR));
                     JUMP_TO_PREDICTED(LOAD_ATTR);
+                }
+            }
+            // _PYVAULT_CHECK_ACCESS
+            {
+                if (!PyStackRef_IsNullOrInt(owner)) {
+                    PyObject *owner_o = PyStackRef_AsPyObjectBorrow(owner);
+                    if (PyVault_GET_OBJ_TAG(owner_o) != 0) {
+                        unsigned short current_color = tstate ? tstate->vault_color : 0;
+                        if (!PyVault_CheckAccessColor(owner_o, current_color)) {
+                            JUMP_TO_LABEL(error);
+                        }
+                    }
                 }
             }
             /* Skip 2 cache entries */
@@ -8802,6 +8954,18 @@
                     JUMP_TO_PREDICTED(LOAD_ATTR);
                 }
             }
+            // _PYVAULT_CHECK_ACCESS
+            {
+                if (!PyStackRef_IsNullOrInt(owner)) {
+                    PyObject *owner_o = PyStackRef_AsPyObjectBorrow(owner);
+                    if (PyVault_GET_OBJ_TAG(owner_o) != 0) {
+                        unsigned short current_color = tstate ? tstate->vault_color : 0;
+                        if (!PyVault_CheckAccessColor(owner_o, current_color)) {
+                            JUMP_TO_LABEL(error);
+                        }
+                    }
+                }
+            }
             // _LOAD_ATTR_SLOT
             {
                 uint16_t index = read_u16(&this_instr[4].cache);
@@ -8869,6 +9033,18 @@
                     UPDATE_MISS_STATS(LOAD_ATTR);
                     assert(_PyOpcode_Deopt[opcode] == (LOAD_ATTR));
                     JUMP_TO_PREDICTED(LOAD_ATTR);
+                }
+            }
+            // _PYVAULT_CHECK_ACCESS
+            {
+                if (!PyStackRef_IsNullOrInt(owner)) {
+                    PyObject *owner_o = PyStackRef_AsPyObjectBorrow(owner);
+                    if (PyVault_GET_OBJ_TAG(owner_o) != 0) {
+                        unsigned short current_color = tstate ? tstate->vault_color : 0;
+                        if (!PyVault_CheckAccessColor(owner_o, current_color)) {
+                            JUMP_TO_LABEL(error);
+                        }
+                    }
                 }
             }
             // _LOAD_ATTR_WITH_HINT
@@ -9161,10 +9337,10 @@
             INSTRUCTION_STATS(LOAD_FAST_BORROW_LOAD_FAST_BORROW);
             _PyStackRef value1;
             _PyStackRef value2;
-            uint32_t oparg1 = oparg >> 4;
-            uint32_t oparg2 = oparg & 15;
-            value1 = PyStackRef_Borrow(GETLOCAL(oparg1));
-            value2 = PyStackRef_Borrow(GETLOCAL(oparg2));
+            uint32_t oparg_hi = oparg >> 4;
+            uint32_t oparg_lo = oparg & 15;
+            value1 = PyStackRef_Borrow(GETLOCAL(oparg_hi));
+            value2 = PyStackRef_Borrow(GETLOCAL(oparg_lo));
             stack_pointer[0] = value1;
             stack_pointer[1] = value2;
             stack_pointer += 2;
@@ -9208,10 +9384,10 @@
             INSTRUCTION_STATS(LOAD_FAST_LOAD_FAST);
             _PyStackRef value1;
             _PyStackRef value2;
-            uint32_t oparg1 = oparg >> 4;
-            uint32_t oparg2 = oparg & 15;
-            value1 = PyStackRef_DUP(GETLOCAL(oparg1));
-            value2 = PyStackRef_DUP(GETLOCAL(oparg2));
+            uint32_t oparg_hi = oparg >> 4;
+            uint32_t oparg_lo = oparg & 15;
+            value1 = PyStackRef_DUP(GETLOCAL(oparg_hi));
+            value2 = PyStackRef_DUP(GETLOCAL(oparg_lo));
             stack_pointer[0] = value1;
             stack_pointer[1] = value2;
             stack_pointer += 2;
@@ -9695,6 +9871,10 @@
                 PyObject *global_super = PyStackRef_AsPyObjectBorrow(global_super_st);
                 PyObject *class = PyStackRef_AsPyObjectBorrow(class_st);
                 PyObject *self = PyStackRef_AsPyObjectBorrow(self_st);
+                unsigned short current_color = tstate ? tstate->vault_color : 0;
+                if (!PyVault_CheckAccessColor(self, current_color)) {
+                    JUMP_TO_LABEL(error);
+                }
                 if (opcode == INSTRUMENTED_LOAD_SUPER_ATTR) {
                     PyObject *arg = oparg & 2 ? class : &_PyInstrumentation_MISSING;
                     _PyFrame_SetStackPointer(frame, stack_pointer);
@@ -9813,6 +9993,10 @@
             PyObject *class = PyStackRef_AsPyObjectBorrow(class_st);
             PyObject *self = PyStackRef_AsPyObjectBorrow(self_st);
             assert(!(oparg & 1));
+            unsigned short current_color = tstate ? tstate->vault_color : 0;
+            if (!PyVault_CheckAccessColor(self, current_color)) {
+                JUMP_TO_LABEL(error);
+            }
             if (global_super != (PyObject *)&PySuper_Type) {
                 UPDATE_MISS_STATS(LOAD_SUPER_ATTR);
                 assert(_PyOpcode_Deopt[opcode] == (LOAD_SUPER_ATTR));
@@ -9876,6 +10060,10 @@
             PyObject *class = PyStackRef_AsPyObjectBorrow(class_st);
             PyObject *self = PyStackRef_AsPyObjectBorrow(self_st);
             assert(oparg & 1);
+            unsigned short current_color = tstate ? tstate->vault_color : 0;
+            if (!PyVault_CheckAccessColor(self, current_color)) {
+                JUMP_TO_LABEL(error);
+            }
             if (global_super != (PyObject *)&PySuper_Type) {
                 UPDATE_MISS_STATS(LOAD_SUPER_ATTR);
                 assert(_PyOpcode_Deopt[opcode] == (LOAD_SUPER_ATTR));
@@ -10601,6 +10789,10 @@
             gen_frame->owner = FRAME_OWNED_BY_GENERATOR;
             _Py_LeaveRecursiveCallPy(tstate);
             _PyInterpreterFrame *prev = frame->previous;
+            PyCodeObject *code = _PyFrame_GetCode(frame);
+            if ((code->co_vault_color & PYVAULT_CODE_COLOR_FLAG) != 0) {
+                tstate->vault_color = frame->vault_prev_color;
+            }
             _PyThreadState_PopFrame(tstate, frame);
             frame = tstate->current_frame = prev;
             LOAD_IP(frame->return_offset);
@@ -10797,6 +10989,11 @@
                 assert( 2u + oparg <= UINT16_MAX);
                 frame->return_offset = (uint16_t)( 2u + oparg);
                 gen_frame->previous = frame;
+                gen_frame->vault_prev_color = tstate->vault_color;
+                PyCodeObject *gen_code = _PyFrame_GetCode(gen_frame);
+                if ((gen_code->co_vault_color & PYVAULT_CODE_COLOR_FLAG) != 0) {
+                    tstate->vault_color = (uint16_t)(gen_code->co_vault_color & PYVAULT_CODE_COLOR_MASK);
+                }
             }
             // _PUSH_FRAME
             {
@@ -10974,6 +11171,18 @@
                 #endif  /* ENABLE_SPECIALIZATION_FT */
             }
             /* Skip 3 cache entries */
+            // _PYVAULT_CHECK_ACCESS
+            {
+                if (!PyStackRef_IsNullOrInt(owner)) {
+                    PyObject *owner_o = PyStackRef_AsPyObjectBorrow(owner);
+                    if (PyVault_GET_OBJ_TAG(owner_o) != 0) {
+                        unsigned short current_color = tstate ? tstate->vault_color : 0;
+                        if (!PyVault_CheckAccessColor(owner_o, current_color)) {
+                            JUMP_TO_LABEL(error);
+                        }
+                    }
+                }
+            }
             // _STORE_ATTR
             {
                 v = stack_pointer[-2];
@@ -11049,6 +11258,18 @@
                     }
                 }
             }
+            // _PYVAULT_CHECK_ACCESS
+            {
+                if (!PyStackRef_IsNullOrInt(owner)) {
+                    PyObject *owner_o = PyStackRef_AsPyObjectBorrow(owner);
+                    if (PyVault_GET_OBJ_TAG(owner_o) != 0) {
+                        unsigned short current_color = tstate ? tstate->vault_color : 0;
+                        if (!PyVault_CheckAccessColor(owner_o, current_color)) {
+                            JUMP_TO_LABEL(error);
+                        }
+                    }
+                }
+            }
             // _STORE_ATTR_INSTANCE_VALUE
             {
                 value = stack_pointer[-2];
@@ -11101,6 +11322,18 @@
                     JUMP_TO_PREDICTED(STORE_ATTR);
                 }
             }
+            // _PYVAULT_CHECK_ACCESS
+            {
+                if (!PyStackRef_IsNullOrInt(owner)) {
+                    PyObject *owner_o = PyStackRef_AsPyObjectBorrow(owner);
+                    if (PyVault_GET_OBJ_TAG(owner_o) != 0) {
+                        unsigned short current_color = tstate ? tstate->vault_color : 0;
+                        if (!PyVault_CheckAccessColor(owner_o, current_color)) {
+                            JUMP_TO_LABEL(error);
+                        }
+                    }
+                }
+            }
             // _STORE_ATTR_SLOT
             {
                 value = stack_pointer[-2];
@@ -11150,6 +11383,18 @@
                     UPDATE_MISS_STATS(STORE_ATTR);
                     assert(_PyOpcode_Deopt[opcode] == (STORE_ATTR));
                     JUMP_TO_PREDICTED(STORE_ATTR);
+                }
+            }
+            // _PYVAULT_CHECK_ACCESS
+            {
+                if (!PyStackRef_IsNullOrInt(owner)) {
+                    PyObject *owner_o = PyStackRef_AsPyObjectBorrow(owner);
+                    if (PyVault_GET_OBJ_TAG(owner_o) != 0) {
+                        unsigned short current_color = tstate ? tstate->vault_color : 0;
+                        if (!PyVault_CheckAccessColor(owner_o, current_color)) {
+                            JUMP_TO_LABEL(error);
+                        }
+                    }
                 }
             }
             // _STORE_ATTR_WITH_HINT
@@ -12337,6 +12582,10 @@
             gen->gi_exc_state.previous_item = NULL;
             _Py_LeaveRecursiveCallPy(tstate);
             _PyInterpreterFrame *gen_frame = frame;
+            PyCodeObject *gen_code = _PyFrame_GetCode(gen_frame);
+            if ((gen_code->co_vault_color & PYVAULT_CODE_COLOR_FLAG) != 0) {
+                tstate->vault_color = gen_frame->vault_prev_color;
+            }
             frame = tstate->current_frame = frame->previous;
             gen_frame->previous = NULL;
             assert(INLINE_CACHE_ENTRIES_SEND == INLINE_CACHE_ENTRIES_FOR_ITER);

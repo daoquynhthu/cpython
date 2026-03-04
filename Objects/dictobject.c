@@ -6710,6 +6710,14 @@ PyDictKeysObject *
 _PyDict_NewKeysForClass(PyHeapTypeObject *cls)
 {
     PyInterpreterState *interp = _PyInterpreterState_GET();
+    PyObject *attrs = NULL;
+    Py_ssize_t static_attr_count = -1;
+    if (cls->ht_type.tp_dict) {
+        attrs = PyDict_GetItem(cls->ht_type.tp_dict, &_Py_ID(__static_attributes__));
+        if (attrs != NULL && PyTuple_Check(attrs)) {
+            static_attr_count = PyTuple_GET_SIZE(attrs);
+        }
+    }
 
     PyDictKeysObject *keys = new_keys_object(
             interp, NEXT_LOG2_SHARED_KEYS_MAX_SIZE, 1);
@@ -6720,18 +6728,21 @@ _PyDict_NewKeysForClass(PyHeapTypeObject *cls)
         assert(keys->dk_nentries == 0);
         /* Set to max size+1 as it will shrink by one before each new object */
         keys->dk_usable = SHARED_KEYS_MAX_SIZE;
+        if (static_attr_count > 0 && static_attr_count < SHARED_KEYS_MAX_SIZE) {
+            Py_ssize_t usable = static_attr_count + 2;
+            if (usable < SHARED_KEYS_MAX_SIZE) {
+                keys->dk_usable = usable;
+            }
+        }
         keys->dk_kind = DICT_KEYS_SPLIT;
     }
-    if (cls->ht_type.tp_dict) {
-        PyObject *attrs = PyDict_GetItem(cls->ht_type.tp_dict, &_Py_ID(__static_attributes__));
-        if (attrs != NULL && PyTuple_Check(attrs)) {
-            for (Py_ssize_t i = 0; i < PyTuple_GET_SIZE(attrs); i++) {
-                PyObject *key = PyTuple_GET_ITEM(attrs, i);
-                Py_hash_t hash;
-                if (PyUnicode_CheckExact(key) && (hash = unicode_get_hash(key)) != -1) {
-                    if (insert_split_key(keys, key, hash) == DKIX_EMPTY) {
-                        break;
-                    }
+    if (static_attr_count > 0) {
+        for (Py_ssize_t i = 0; i < static_attr_count; i++) {
+            PyObject *key = PyTuple_GET_ITEM(attrs, i);
+            Py_hash_t hash;
+            if (PyUnicode_CheckExact(key) && (hash = unicode_get_hash(key)) != -1) {
+                if (insert_split_key(keys, key, hash) == DKIX_EMPTY) {
+                    break;
                 }
             }
         }
@@ -6750,15 +6761,15 @@ _PyObject_InitInlineValues(PyObject *obj, PyTypeObject *tp)
     OBJECT_STAT_INC(inline_values);
 #ifdef Py_GIL_DISABLED
     Py_ssize_t usable = _Py_atomic_load_ssize_relaxed(&keys->dk_usable);
-    if (usable > 1) {
+    if (usable > 2) {
         LOCK_KEYS(keys);
-        if (keys->dk_usable > 1) {
+        if (keys->dk_usable > 2) {
             _Py_atomic_store_ssize(&keys->dk_usable, keys->dk_usable - 1);
         }
         UNLOCK_KEYS(keys);
     }
 #else
-    if (keys->dk_usable > 1) {
+    if (keys->dk_usable > 2) {
         keys->dk_usable--;
     }
 #endif

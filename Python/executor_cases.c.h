@@ -319,6 +319,36 @@
             break;
         }
 
+        case _LOAD_FAST_LOAD_FAST: {
+            _PyStackRef value1;
+            _PyStackRef value2;
+            oparg = CURRENT_OPARG();
+            uint32_t oparg_hi = oparg >> 4;
+            uint32_t oparg_lo = oparg & 15;
+            value1 = PyStackRef_DUP(GETLOCAL(oparg_hi));
+            value2 = PyStackRef_DUP(GETLOCAL(oparg_lo));
+            stack_pointer[0] = value1;
+            stack_pointer[1] = value2;
+            stack_pointer += 2;
+            assert(WITHIN_STACK_BOUNDS());
+            break;
+        }
+
+        case _LOAD_FAST_BORROW_LOAD_FAST_BORROW: {
+            _PyStackRef value1;
+            _PyStackRef value2;
+            oparg = CURRENT_OPARG();
+            uint32_t oparg_hi = oparg >> 4;
+            uint32_t oparg_lo = oparg & 15;
+            value1 = PyStackRef_Borrow(GETLOCAL(oparg_hi));
+            value2 = PyStackRef_Borrow(GETLOCAL(oparg_lo));
+            stack_pointer[0] = value1;
+            stack_pointer[1] = value2;
+            stack_pointer += 2;
+            assert(WITHIN_STACK_BOUNDS());
+            break;
+        }
+
         /* _LOAD_CONST is not a viable micro-op for tier 2 because it uses the 'this_instr' variable */
 
         case _LOAD_CONST_MORTAL: {
@@ -1950,6 +1980,11 @@
             assert( 2u + oparg <= UINT16_MAX);
             frame->return_offset = (uint16_t)( 2u + oparg);
             gen_frame->previous = frame;
+            gen_frame->vault_prev_color = tstate->vault_color;
+            PyCodeObject *gen_code = _PyFrame_GetCode(gen_frame);
+            if ((gen_code->co_vault_color & PYVAULT_CODE_COLOR_FLAG) != 0) {
+                tstate->vault_color = (uint16_t)(gen_code->co_vault_color & PYVAULT_CODE_COLOR_MASK);
+            }
             stack_pointer[-1].bits = (uintptr_t)gen_frame;
             break;
         }
@@ -1973,6 +2008,10 @@
             gen->gi_exc_state.previous_item = NULL;
             _Py_LeaveRecursiveCallPy(tstate);
             _PyInterpreterFrame *gen_frame = frame;
+            PyCodeObject *gen_code = _PyFrame_GetCode(gen_frame);
+            if ((gen_code->co_vault_color & PYVAULT_CODE_COLOR_FLAG) != 0) {
+                tstate->vault_color = gen_frame->vault_prev_color;
+            }
             frame = tstate->current_frame = frame->previous;
             gen_frame->previous = NULL;
             assert(INLINE_CACHE_ENTRIES_SEND == INLINE_CACHE_ENTRIES_FOR_ITER);
@@ -2261,24 +2300,7 @@
             break;
         }
 
-        case _DELETE_ATTR: {
-            _PyStackRef owner;
-            oparg = CURRENT_OPARG();
-            owner = stack_pointer[-1];
-            PyObject *name = GETITEM(FRAME_CO_NAMES, oparg);
-            _PyFrame_SetStackPointer(frame, stack_pointer);
-            int err = PyObject_DelAttr(PyStackRef_AsPyObjectBorrow(owner), name);
-            stack_pointer = _PyFrame_GetStackPointer(frame);
-            stack_pointer += -1;
-            assert(WITHIN_STACK_BOUNDS());
-            _PyFrame_SetStackPointer(frame, stack_pointer);
-            PyStackRef_CLOSE(owner);
-            stack_pointer = _PyFrame_GetStackPointer(frame);
-            if (err) {
-                JUMP_TO_ERROR();
-            }
-            break;
-        }
+        /* _DELETE_ATTR is not a viable micro-op for tier 2 because it has both popping and not-popping errors */
 
         case _STORE_GLOBAL: {
             _PyStackRef v;
@@ -3066,55 +3088,7 @@
             break;
         }
 
-        case _LOAD_SUPER_ATTR_ATTR: {
-            _PyStackRef self_st;
-            _PyStackRef class_st;
-            _PyStackRef global_super_st;
-            _PyStackRef attr_st;
-            oparg = CURRENT_OPARG();
-            self_st = stack_pointer[-1];
-            class_st = stack_pointer[-2];
-            global_super_st = stack_pointer[-3];
-            PyObject *global_super = PyStackRef_AsPyObjectBorrow(global_super_st);
-            PyObject *class = PyStackRef_AsPyObjectBorrow(class_st);
-            PyObject *self = PyStackRef_AsPyObjectBorrow(self_st);
-            assert(!(oparg & 1));
-            if (global_super != (PyObject *)&PySuper_Type) {
-                UOP_STAT_INC(uopcode, miss);
-                JUMP_TO_JUMP_TARGET();
-            }
-            if (!PyType_Check(class)) {
-                UOP_STAT_INC(uopcode, miss);
-                JUMP_TO_JUMP_TARGET();
-            }
-            STAT_INC(LOAD_SUPER_ATTR, hit);
-            PyObject *name = GETITEM(FRAME_CO_NAMES, oparg >> 2);
-            _PyFrame_SetStackPointer(frame, stack_pointer);
-            PyObject *attr = _PySuper_Lookup((PyTypeObject *)class, self, name, NULL);
-            _PyStackRef tmp = self_st;
-            self_st = PyStackRef_NULL;
-            stack_pointer[-1] = self_st;
-            PyStackRef_CLOSE(tmp);
-            tmp = class_st;
-            class_st = PyStackRef_NULL;
-            stack_pointer[-2] = class_st;
-            PyStackRef_CLOSE(tmp);
-            tmp = global_super_st;
-            global_super_st = PyStackRef_NULL;
-            stack_pointer[-3] = global_super_st;
-            PyStackRef_CLOSE(tmp);
-            stack_pointer = _PyFrame_GetStackPointer(frame);
-            stack_pointer += -3;
-            assert(WITHIN_STACK_BOUNDS());
-            if (attr == NULL) {
-                JUMP_TO_ERROR();
-            }
-            attr_st = PyStackRef_FromPyObjectSteal(attr);
-            stack_pointer[0] = attr_st;
-            stack_pointer += 1;
-            assert(WITHIN_STACK_BOUNDS());
-            break;
-        }
+        /* _LOAD_SUPER_ATTR_ATTR is not a viable micro-op for tier 2 because it has both popping and not-popping errors */
 
         case _LOAD_SUPER_ATTR_METHOD: {
             _PyStackRef self_st;
@@ -3130,6 +3104,10 @@
             PyObject *class = PyStackRef_AsPyObjectBorrow(class_st);
             PyObject *self = PyStackRef_AsPyObjectBorrow(self_st);
             assert(oparg & 1);
+            unsigned short current_color = tstate ? tstate->vault_color : 0;
+            if (!PyVault_CheckAccessColor(self, current_color)) {
+                JUMP_TO_ERROR();
+            }
             if (global_super != (PyObject *)&PySuper_Type) {
                 UOP_STAT_INC(uopcode, miss);
                 JUMP_TO_JUMP_TARGET();
@@ -3231,6 +3209,21 @@
             stack_pointer[-1] = attr;
             stack_pointer += (oparg&1);
             assert(WITHIN_STACK_BOUNDS());
+            break;
+        }
+
+        case _PYVAULT_CHECK_ACCESS: {
+            _PyStackRef owner;
+            owner = stack_pointer[-1];
+            if (!PyStackRef_IsNullOrInt(owner)) {
+                PyObject *owner_o = PyStackRef_AsPyObjectBorrow(owner);
+                if (PyVault_GET_OBJ_TAG(owner_o) != 0) {
+                    unsigned short current_color = tstate ? tstate->vault_color : 0;
+                    if (!PyVault_CheckAccessColor(owner_o, current_color)) {
+                        JUMP_TO_ERROR();
+                    }
+                }
+            }
             break;
         }
 
@@ -6654,6 +6647,10 @@
             gen_frame->owner = FRAME_OWNED_BY_GENERATOR;
             _Py_LeaveRecursiveCallPy(tstate);
             _PyInterpreterFrame *prev = frame->previous;
+            PyCodeObject *code = _PyFrame_GetCode(frame);
+            if ((code->co_vault_color & PYVAULT_CODE_COLOR_FLAG) != 0) {
+                tstate->vault_color = frame->vault_prev_color;
+            }
             _PyThreadState_PopFrame(tstate, frame);
             frame = tstate->current_frame = prev;
             LOAD_IP(frame->return_offset);

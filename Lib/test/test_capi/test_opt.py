@@ -14,7 +14,7 @@ from test.support import (script_helper, requires_specialization,
 
 _testinternalcapi = import_helper.import_module("_testinternalcapi")
 
-from _testinternalcapi import TIER2_THRESHOLD
+from _testinternalcapi import TIER2_THRESHOLD, JIT_HOT_BACKEDGE_THRESHOLD, JIT_HOT_EXIT_THRESHOLD
 
 
 @contextlib.contextmanager
@@ -135,6 +135,32 @@ class TestUops(unittest.TestCase):
         uops = get_opnames(ex)
         self.assertIn("_JUMP_TO_TOP", uops)
         self.assertIn("_LOAD_FAST_BORROW_0", uops)
+
+    def test_pyvault_super_attr_jit(self):
+        if not hasattr(sys, "set_obj_tag") or not hasattr(sys, "set_color"):
+            self.skipTest("PyVault not available")
+
+        class Base:
+            value = 1
+
+        class Child(Base):
+            def get_value(self, n):
+                total = 0
+                for _ in range(n):
+                    total += super().value
+                return total
+
+        obj = Child()
+        with clear_executors(Child.get_value):
+            sys.set_obj_tag(obj, 1)
+            sys.set_color(1)
+            self.assertEqual(obj.get_value(TIER2_THRESHOLD), TIER2_THRESHOLD)
+            ex = get_first_executor(Child.get_value)
+            self.assertIsNotNone(ex)
+            sys.set_color(2)
+            with self.assertRaises(PermissionError):
+                obj.get_value(1)
+            sys.set_color(0)
 
     def test_extended_arg(self):
         "Check EXTENDED_ARG handling in superblock creation"
@@ -269,6 +295,37 @@ class TestUops(unittest.TestCase):
         self.assertIsNotNone(ex)
         uops = get_opnames(ex)
         self.assertIn("_JUMP_TO_TOP", uops)
+
+    def test_hot_backedge_cache(self):
+        def testfunc(n):
+            total = 0
+            i = 0
+            while i < n:
+                total += i
+                i += 1
+            return total
+
+        self.assertLess(JIT_HOT_BACKEDGE_THRESHOLD, TIER2_THRESHOLD)
+        with clear_executors(testfunc):
+            testfunc(JIT_HOT_BACKEDGE_THRESHOLD + 2)
+            ex = get_first_executor(testfunc)
+            self.assertIsNotNone(ex)
+
+    def test_hot_exit_patch(self):
+        def testfunc(n, x):
+            total = 0
+            for _ in range(n):
+                total += x
+            return total
+
+        with clear_executors(testfunc):
+            testfunc(TIER2_THRESHOLD, 1)
+            ex = get_first_executor(testfunc)
+            self.assertIsNotNone(ex)
+            for _ in range(JIT_HOT_EXIT_THRESHOLD + 2):
+                testfunc(10, 1.5)
+            exits = _testinternalcapi.get_executor_exits(ex)
+            self.assertTrue(any(patched and has_exec for _, _, patched, has_exec in exits))
 
     def test_jump_forward(self):
         def testfunc(n):

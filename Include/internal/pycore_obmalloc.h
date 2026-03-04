@@ -304,6 +304,7 @@ struct arena_object {
      */
     struct arena_object* nextarena;
     struct arena_object* prevarena;
+    uint16_t vault_tag;                 /* PyVault: security color of this arena */
 };
 
 #define POOL_OVERHEAD   _Py_SIZE_ROUND_UP(sizeof(struct pool_header), ALIGNMENT)
@@ -416,8 +417,12 @@ the prevpool member.
 
 #define OBMALLOC_USED_POOLS_SIZE (2 * ((NB_SMALL_SIZE_CLASSES + 7) / 8) * 8)
 
-struct _obmalloc_pools {
+struct _obmalloc_color_pools {
     poolp used[OBMALLOC_USED_POOLS_SIZE];
+};
+
+struct _obmalloc_pools {
+    struct _obmalloc_color_pools colors[PYVAULT_COLORS];
 };
 
 
@@ -488,10 +493,10 @@ struct _obmalloc_mgmt {
     /* The head of the doubly-linked, NULL-terminated at each end, list of
      * arena_objects associated with arenas that have pools available.
      */
-    struct arena_object* usable_arenas;
+    struct arena_object* color_usable_arenas[PYVAULT_COLORS];
 
     /* nfp2lasta[nfp] is the last arena in usable_arenas with nfp free pools */
-    struct arena_object* nfp2lasta[MAX_POOLS_IN_ARENA + 1];
+    struct arena_object* color_nfp2lasta[PYVAULT_COLORS][MAX_POOLS_IN_ARENA + 1];
 
     /* Number of arenas allocated that haven't been free()'d. */
     size_t narenas_currently_allocated;
@@ -619,6 +624,8 @@ struct _obmalloc_mgmt {
 typedef struct {
     int32_t tail_hi;
     int32_t tail_lo;
+    uint16_t vault_tag;                 /* PyVault: security color */
+    uint16_t _padding;
 } arena_coverage_t;
 
 typedef struct arena_map_bot {

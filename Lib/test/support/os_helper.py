@@ -183,11 +183,12 @@ def can_symlink():
     symlink_path = src + "can_symlink"
     try:
         os.symlink(src, symlink_path)
-        can = True
+        can = os.path.lexists(symlink_path)
     except (OSError, NotImplementedError, AttributeError):
         can = False
     else:
-        os.remove(symlink_path)
+        if can:
+            os.remove(symlink_path)
     _can_symlink = can
     return can
 

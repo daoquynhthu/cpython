@@ -66,6 +66,34 @@
             break;
         }
 
+        case _LOAD_FAST_LOAD_FAST: {
+            JitOptSymbol *value1;
+            JitOptSymbol *value2;
+            uint32_t oparg_hi = oparg >> 4;
+            uint32_t oparg_lo = oparg & 15;
+            value1 = GETLOCAL(oparg_hi);
+            value2 = GETLOCAL(oparg_lo);
+            stack_pointer[0] = value1;
+            stack_pointer[1] = value2;
+            stack_pointer += 2;
+            assert(WITHIN_STACK_BOUNDS());
+            break;
+        }
+
+        case _LOAD_FAST_BORROW_LOAD_FAST_BORROW: {
+            JitOptSymbol *value1;
+            JitOptSymbol *value2;
+            uint32_t oparg_hi = oparg >> 4;
+            uint32_t oparg_lo = oparg & 15;
+            value1 = GETLOCAL(oparg_hi);
+            value2 = GETLOCAL(oparg_lo);
+            stack_pointer[0] = value1;
+            stack_pointer[1] = value2;
+            stack_pointer += 2;
+            assert(WITHIN_STACK_BOUNDS());
+            break;
+        }
+
         /* _LOAD_CONST is not a viable micro-op for tier 2 */
 
         case _LOAD_CONST_MORTAL: {
@@ -923,11 +951,7 @@
             break;
         }
 
-        case _DELETE_ATTR: {
-            stack_pointer += -1;
-            assert(WITHIN_STACK_BOUNDS());
-            break;
-        }
+        /* _DELETE_ATTR is not a viable micro-op for tier 2 */
 
         case _STORE_GLOBAL: {
             stack_pointer += -1;
@@ -1142,14 +1166,7 @@
             break;
         }
 
-        case _LOAD_SUPER_ATTR_ATTR: {
-            JitOptSymbol *attr_st;
-            attr_st = sym_new_not_null(ctx);
-            stack_pointer[-3] = attr_st;
-            stack_pointer += -2;
-            assert(WITHIN_STACK_BOUNDS());
-            break;
-        }
+        /* _LOAD_SUPER_ATTR_ATTR is not a viable micro-op for tier 2 */
 
         case _LOAD_SUPER_ATTR_METHOD: {
             JitOptSymbol *attr;
@@ -1177,6 +1194,10 @@
             stack_pointer[-1] = attr;
             stack_pointer += (oparg&1);
             assert(WITHIN_STACK_BOUNDS());
+            break;
+        }
+
+        case _PYVAULT_CHECK_ACCESS: {
             break;
         }
 

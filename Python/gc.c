@@ -1265,6 +1265,37 @@ handle_resurrected_objects(PyGC_Head *unreachable, PyGC_Head* still_unreachable,
     gc_list_merge(resurrected, old_generation);
 }
 
+static inline int
+gc_color_matches(PyThreadState *tstate, PyObject *op)
+{
+    uint16_t current = tstate->vault_color;
+    if (current == 0) {
+        return 1;
+    }
+    uint8_t tag = PyVault_GET_OBJ_TAG(op);
+    return tag == 0 || tag == (uint8_t)current;
+}
+
+static void
+filter_unreachable_by_color(PyThreadState *tstate, PyGC_Head *unreachable, PyGC_Head *to)
+{
+    uint16_t current = tstate->vault_color;
+    if (current == 0) {
+        return;
+    }
+    PyGC_Head *gc, *next;
+    for (gc = GC_NEXT(unreachable); gc != unreachable; gc = next) {
+        PyObject *op = FROM_GC(gc);
+        next = GC_NEXT(gc);
+        if (gc_color_matches(tstate, op)) {
+            continue;
+        }
+        gc->_gc_next &= ~NEXT_MASK_UNREACHABLE;
+        gc_clear_collecting(gc);
+        gc_list_move(gc, to);
+    }
+}
+
 static void
 gc_collect_region(PyThreadState *tstate,
                   PyGC_Head *from,
@@ -1571,7 +1602,7 @@ mark_at_start(PyThreadState *tstate)
 }
 
 static intptr_t
-assess_work_to_do(GCState *gcstate)
+assess_work_to_do(GCState *gcstate, intptr_t *slice_limit)
 {
     /* The amount of work we want to do depends on three things.
      * 1. The number of new objects created
@@ -1595,6 +1626,16 @@ assess_work_to_do(GCState *gcstate)
     if (heap_fraction > max_heap_fraction) {
         heap_fraction = max_heap_fraction;
     }
+    intptr_t limit = heap_fraction + (new_objects / scale_factor);
+    if (limit < heap_fraction) {
+        limit = heap_fraction;
+    }
+    if (limit < 0) {
+        limit = 0;
+    }
+    if (slice_limit != NULL) {
+        *slice_limit = limit;
+    }
     gcstate->young.count = 0;
     return new_objects + heap_fraction;
 }
@@ -1604,7 +1645,8 @@ gc_collect_increment(PyThreadState *tstate, struct gc_collection_stats *stats)
 {
     GC_STAT_ADD(1, collections, 1);
     GCState *gcstate = &tstate->interp->gc;
-    gcstate->work_to_do += assess_work_to_do(gcstate);
+    intptr_t slice_limit = 0;
+    gcstate->work_to_do += assess_work_to_do(gcstate, &slice_limit);
     if (gcstate->work_to_do < 0) {
         return;
     }
@@ -1613,6 +1655,9 @@ gc_collect_increment(PyThreadState *tstate, struct gc_collection_stats *stats)
         Py_ssize_t objects_marked = mark_at_start(tstate);
         GC_STAT_ADD(1, objects_transitively_reachable, objects_marked);
         gcstate->work_to_do -= objects_marked;
+        if (gcstate->work_to_do > 0) {
+            _Py_ScheduleGC(tstate);
+        }
         validate_spaces(gcstate);
         return;
     }
@@ -1631,7 +1676,11 @@ gc_collect_increment(PyThreadState *tstate, struct gc_collection_stats *stats)
     gc_list_merge(&gcstate->young.head, &increment);
     gc_list_validate_space(&increment, gcstate->visited_space);
     Py_ssize_t increment_size = gc_list_size(&increment);
-    while (increment_size < gcstate->work_to_do) {
+    intptr_t target_work = gcstate->work_to_do;
+    if (slice_limit > 0 && target_work > slice_limit) {
+        target_work = slice_limit;
+    }
+    while (increment_size < target_work) {
         if (gc_list_is_empty(not_visited)) {
             break;
         }
@@ -1655,6 +1704,9 @@ gc_collect_increment(PyThreadState *tstate, struct gc_collection_stats *stats)
     add_stats(gcstate, 1, stats);
     if (gc_list_is_empty(not_visited)) {
         completed_scavenge(gcstate);
+    }
+    else if (gcstate->work_to_do > 0) {
+        _Py_ScheduleGC(tstate);
     }
     validate_spaces(gcstate);
 }
@@ -1715,6 +1767,7 @@ gc_collect_region(PyThreadState *tstate,
         gc_list_merge(from, to);
     }
     validate_consistent_old_space(to);
+    filter_unreachable_by_color(tstate, &unreachable, to);
     /* Move reachable objects to next generation. */
 
     /* All objects in unreachable are trash, but objects reachable from

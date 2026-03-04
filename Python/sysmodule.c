@@ -16,6 +16,7 @@ Data members:
 
 #include "Python.h"
 #include "pycore_audit.h"         // _Py_AuditHookEntry
+#include "pycore_backoff.h"
 #include "pycore_call.h"          // _PyObject_CallNoArgs()
 #include "pycore_ceval.h"         // _PyEval_SetAsyncGenFinalizer()
 #include "pycore_frame.h"         // _PyInterpreterFrame
@@ -2819,6 +2820,187 @@ PyAPI_FUNC(int) PyUnstable_CopyPerfMapFile(const char* parent_filename) {
 }
 
 
+PyDoc_STRVAR(sys_set_color__doc__,
+"set_color($module, /, color)\n"
+"--\n"
+"\n"
+"Set the current thread's security color.");
+
+PyDoc_STRVAR(sys_get_color__doc__,
+"get_color($module, /)\n"
+"--\n"
+"\n"
+"Get the current thread's security color.");
+
+PyDoc_STRVAR(sys_set_code_color__doc__,
+"set_code_color($module, /, code, color)\n"
+"--\n"
+"\n"
+"Set a code object's security color.");
+
+PyDoc_STRVAR(sys_get_code_color__doc__,
+"get_code_color($module, /, code)\n"
+"--\n"
+"\n"
+"Get a code object's security color.");
+
+PyDoc_STRVAR(sys_set_obj_tag__doc__,
+"set_obj_tag($module, /, obj, tag)\n"
+"--\n"
+"\n"
+"Set an object's security tag (color).");
+
+PyDoc_STRVAR(sys_get_obj_tag__doc__,
+"get_obj_tag($module, /, obj)\n"
+"--\n"
+"\n"
+"Get an object's security tag (color).");
+
+PyDoc_STRVAR(sys_seal__doc__,
+"seal($module, /, module, color)\n"
+"--\n"
+"\n"
+"Seal a module by tagging its members with a security color.");
+
+/* PyVault: Security API */
+
+static PyObject *
+sys_set_color(PyObject *self, PyObject *arg)
+{
+    int color = (int)PyLong_AsLong(arg);
+    if (color == -1 && PyErr_Occurred())
+        return NULL;
+    if (color < 0 || color > 0xFF) {
+        PyErr_SetString(PyExc_ValueError, "color must be between 0 and 255");
+        return NULL;
+    }
+    PyVault_Enable();
+    PyThreadState *tstate = _PyThreadState_GET();
+    tstate->vault_color = (uint16_t)color;
+    Py_RETURN_NONE;
+}
+
+static PyObject *
+sys_get_color(PyObject *self, PyObject *Py_UNUSED(ignored))
+{
+    PyThreadState *tstate = _PyThreadState_GET();
+    return PyLong_FromLong((long)tstate->vault_color);
+}
+
+static PyObject *
+sys_set_code_color(PyObject *self, PyObject *args)
+{
+    PyObject *code_obj;
+    int color;
+    if (!PyArg_ParseTuple(args, "Oi", &code_obj, &color))
+        return NULL;
+    if (!PyCode_Check(code_obj)) {
+        PyErr_SetString(PyExc_TypeError, "arg 1 must be a code object");
+        return NULL;
+    }
+    if (color < 0 || color > 0xFF) {
+        PyErr_SetString(PyExc_ValueError, "color must be between 0 and 255");
+        return NULL;
+    }
+    PyVault_Enable();
+    ((PyCodeObject *)code_obj)->co_vault_color = (uint16_t)(PYVAULT_CODE_COLOR_FLAG | (uint16_t)color);
+    Py_RETURN_NONE;
+}
+
+static PyObject *
+sys_get_code_color(PyObject *self, PyObject *args)
+{
+    PyObject *code_obj;
+    if (!PyArg_ParseTuple(args, "O", &code_obj))
+        return NULL;
+    if (!PyCode_Check(code_obj)) {
+        PyErr_SetString(PyExc_TypeError, "arg 1 must be a code object");
+        return NULL;
+    }
+    uint16_t raw_color = ((PyCodeObject *)code_obj)->co_vault_color;
+    if ((raw_color & PYVAULT_CODE_COLOR_FLAG) == 0) {
+        return PyLong_FromLong(0);
+    }
+    return PyLong_FromLong((long)(raw_color & PYVAULT_CODE_COLOR_MASK));
+}
+
+static PyObject *
+sys_set_obj_tag(PyObject *self, PyObject *args)
+{
+    PyObject *obj;
+    int tag;
+    if (!PyArg_ParseTuple(args, "Oi", &obj, &tag))
+        return NULL;
+    if (tag < 0 || tag > 0xFF) {
+        PyErr_SetString(PyExc_ValueError, "tag must be between 0 and 255");
+        return NULL;
+    }
+    PyVault_Enable();
+    PyVault_SET_OBJ_TAG(obj, (uint8_t)tag);
+    Py_RETURN_NONE;
+}
+
+static PyObject *
+sys_get_obj_tag(PyObject *self, PyObject *obj)
+{
+    uint8_t tag = PyVault_GET_OBJ_TAG(obj);
+    return PyLong_FromLong((long)tag);
+}
+
+static PyObject *
+sys_seal(PyObject *self, PyObject *args)
+{
+    PyObject *module;
+    int color;
+    if (!PyArg_ParseTuple(args, "Oi", &module, &color))
+        return NULL;
+    if (!PyModule_Check(module)) {
+        PyErr_SetString(PyExc_TypeError, "arg 1 must be a module object");
+        return NULL;
+    }
+    if (color < 0 || color > 0xFF) {
+        PyErr_SetString(PyExc_ValueError, "color must be between 0 and 255");
+        return NULL;
+    }
+
+    PyVault_Enable();
+    uint8_t tag = (uint8_t)color; // We use 8-bit tags for objects
+    PyVault_SET_OBJ_TAG(module, tag);
+
+    PyObject *dict = PyModule_GetDict(module);
+    if (dict) {
+        PyVault_SET_OBJ_TAG(dict, tag);
+        Py_ssize_t pos = 0;
+        PyObject *key, *value;
+        while (PyDict_Next(dict, &pos, &key, &value)) {
+            if (PyUnicode_Check(key)) {
+                Py_ssize_t key_len = PyUnicode_GET_LENGTH(key);
+                if (key_len >= 4 &&
+                    PyUnicode_ReadChar(key, 0) == '_' &&
+                    PyUnicode_ReadChar(key, 1) == '_' &&
+                    PyUnicode_ReadChar(key, key_len - 2) == '_' &&
+                    PyUnicode_ReadChar(key, key_len - 1) == '_') {
+                    continue;
+                }
+            }
+            if (value == Py_None || value == Py_True || value == Py_False) {
+                continue;
+            }
+            PyVault_SET_OBJ_TAG(value, tag);
+
+            if (PyFunction_Check(value)) {
+                PyObject *code = PyFunction_GetCode(value);
+                if (code) {
+                    ((PyCodeObject *)code)->co_vault_color = (uint16_t)(PYVAULT_CODE_COLOR_FLAG | (uint16_t)color);
+                }
+            }
+        }
+    }
+
+    Py_RETURN_NONE;
+}
+
+
 static PyMethodDef sys_methods[] = {
     /* Might as well keep this in alphabetic order */
     SYS_ADDAUDITHOOK_METHODDEF
@@ -2894,6 +3076,13 @@ static PyMethodDef sys_methods[] = {
     SYS__CLEAR_TYPE_DESCRIPTORS_METHODDEF
     SYS__IS_GIL_ENABLED_METHODDEF
     SYS__DUMP_TRACELETS_METHODDEF
+    {"set_color", _PyCFunction_CAST(sys_set_color), METH_O, sys_set_color__doc__},
+    {"get_color", _PyCFunction_CAST(sys_get_color), METH_NOARGS, sys_get_color__doc__},
+    {"set_code_color", _PyCFunction_CAST(sys_set_code_color), METH_VARARGS, sys_set_code_color__doc__},
+    {"get_code_color", _PyCFunction_CAST(sys_get_code_color), METH_VARARGS, sys_get_code_color__doc__},
+    {"set_obj_tag", _PyCFunction_CAST(sys_set_obj_tag), METH_VARARGS, sys_set_obj_tag__doc__},
+    {"get_obj_tag", _PyCFunction_CAST(sys_get_obj_tag), METH_O, sys_get_obj_tag__doc__},
+    {"seal", _PyCFunction_CAST(sys_seal), METH_VARARGS, sys_seal__doc__},
     {NULL, NULL}  // sentinel
 };
 
@@ -4065,7 +4254,88 @@ module _jit
 [clinic start generated code]*/
 /*[clinic end generated code: output=da39a3ee5e6b4b0d input=10952f74d7bbd972]*/
 
-PyDoc_STRVAR(_jit_doc, "Utilities for observing just-in-time compilation.");
+PyDoc_STRVAR(_jit_doc, "Utilities for observing just-in-time compilation and stats.");
+
+PyDoc_STRVAR(_jit_stats_doc,
+"Return a dict of JIT optimization counters, or None if stats are unavailable.");
+
+PyDoc_STRVAR(_jit_get_threshold_doc,
+"Return the JIT hot loop threshold.");
+
+PyDoc_STRVAR(_jit_set_threshold_doc,
+"Set the JIT hot loop threshold.");
+
+static int
+_jit_stats_set_u64(PyObject *dict, const char *name, uint64_t value)
+{
+    PyObject *obj = PyLong_FromUnsignedLongLong(value);
+    if (obj == NULL) {
+        return -1;
+    }
+    int res = PyDict_SetItemString(dict, name, obj);
+    Py_DECREF(obj);
+    return res;
+}
+
+static PyObject *
+_jit_stats(PyObject *module, PyObject *Py_UNUSED(ignored))
+{
+    (void)module;
+#ifdef Py_STATS
+    if (_Py_stats == NULL) {
+        Py_RETURN_NONE;
+    }
+    const OptimizationStats *stats = &_Py_stats->optimization_stats;
+    PyObject *dict = PyDict_New();
+    if (dict == NULL) {
+        return NULL;
+    }
+    if (_jit_stats_set_u64(dict, "attempts", stats->attempts) < 0) goto error;
+    if (_jit_stats_set_u64(dict, "traces_created", stats->traces_created) < 0) goto error;
+    if (_jit_stats_set_u64(dict, "traces_executed", stats->traces_executed) < 0) goto error;
+    if (_jit_stats_set_u64(dict, "uops_executed", stats->uops_executed) < 0) goto error;
+    if (_jit_stats_set_u64(dict, "trace_too_long", stats->trace_too_long) < 0) goto error;
+    if (_jit_stats_set_u64(dict, "trace_too_short", stats->trace_too_short) < 0) goto error;
+    if (_jit_stats_set_u64(dict, "executors_invalidated", stats->executors_invalidated) < 0) goto error;
+    if (_jit_stats_set_u64(dict, "jit_total_memory_size", stats->jit_total_memory_size) < 0) goto error;
+    if (_jit_stats_set_u64(dict, "jit_code_size", stats->jit_code_size) < 0) goto error;
+    if (_jit_stats_set_u64(dict, "jit_trampoline_size", stats->jit_trampoline_size) < 0) goto error;
+    if (_jit_stats_set_u64(dict, "jit_data_size", stats->jit_data_size) < 0) goto error;
+    if (_jit_stats_set_u64(dict, "jit_padding_size", stats->jit_padding_size) < 0) goto error;
+    if (_jit_stats_set_u64(dict, "jit_freed_memory_size", stats->jit_freed_memory_size) < 0) goto error;
+    return dict;
+error:
+    Py_DECREF(dict);
+    return NULL;
+#else
+    Py_RETURN_NONE;
+#endif
+}
+
+static PyObject *
+_jit_get_threshold(PyObject *module, PyObject *Py_UNUSED(ignored))
+{
+    (void)module;
+    return PyLong_FromUnsignedLong((unsigned long)_Py_jump_backoff_initial_value + 1);
+}
+
+static PyObject *
+_jit_set_threshold(PyObject *module, PyObject *arg)
+{
+    (void)module;
+    long value = PyLong_AsLong(arg);
+    if (value == -1 && PyErr_Occurred()) {
+        return NULL;
+    }
+    long max_value = JUMP_BACKWARD_INITIAL_VALUE + 1;
+    if (value < 1 || value > max_value) {
+        PyErr_Format(PyExc_ValueError,
+                     "threshold must be between 1 and %ld", max_value);
+        return NULL;
+    }
+    _Py_jump_backoff_initial_value = (uint16_t)(value - 1);
+    Py_RETURN_NONE;
+}
 
 /*[clinic input]
 _jit.is_available -> bool
@@ -4114,6 +4384,9 @@ static PyMethodDef _jit_methods[] = {
     _JIT_IS_AVAILABLE_METHODDEF
     _JIT_IS_ENABLED_METHODDEF
     _JIT_IS_ACTIVE_METHODDEF
+    {"get_threshold", _jit_get_threshold, METH_NOARGS, _jit_get_threshold_doc},
+    {"set_threshold", _jit_set_threshold, METH_O, _jit_set_threshold_doc},
+    {"stats", _jit_stats, METH_NOARGS, _jit_stats_doc},
     {NULL}
 };
 

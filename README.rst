@@ -1,5 +1,17 @@
-This is Python version 3.14.3
-=============================
+This is PyVault (Python 3.14.3 with Memory Isolation)
+======================================================
+
+PyVault is a memory isolation solution based on CPython 3.14.3.
+Key features include:
+- Memory Coloring
+- Object Capability Management
+- Radix Tree Tracking
+- Memory state locking via ``sys.seal()``
+
+For build and run instructions, please refer to the official CPython guide below.
+
+Official CPython Information:
+-----------------------------
 
 .. image:: https://github.com/python/cpython/actions/workflows/build.yml/badge.svg?branch=main&event=push
    :alt: CPython build status on GitHub Actions

@@ -290,17 +290,17 @@ dummy_func(
         }
 
         inst(LOAD_FAST_LOAD_FAST, ( -- value1, value2)) {
-            uint32_t oparg1 = oparg >> 4;
-            uint32_t oparg2 = oparg & 15;
-            value1 = PyStackRef_DUP(GETLOCAL(oparg1));
-            value2 = PyStackRef_DUP(GETLOCAL(oparg2));
+            uint32_t oparg_hi = oparg >> 4;
+            uint32_t oparg_lo = oparg & 15;
+            value1 = PyStackRef_DUP(GETLOCAL(oparg_hi));
+            value2 = PyStackRef_DUP(GETLOCAL(oparg_lo));
         }
 
         inst(LOAD_FAST_BORROW_LOAD_FAST_BORROW, ( -- value1, value2)) {
-            uint32_t oparg1 = oparg >> 4;
-            uint32_t oparg2 = oparg & 15;
-            value1 = PyStackRef_Borrow(GETLOCAL(oparg1));
-            value2 = PyStackRef_Borrow(GETLOCAL(oparg2));
+            uint32_t oparg_hi = oparg >> 4;
+            uint32_t oparg_lo = oparg & 15;
+            value1 = PyStackRef_Borrow(GETLOCAL(oparg_hi));
+            value2 = PyStackRef_Borrow(GETLOCAL(oparg_lo));
         }
 
         family(LOAD_CONST, 0) = {
@@ -1356,6 +1356,11 @@ dummy_func(
             assert(INSTRUCTION_SIZE + oparg <= UINT16_MAX);
             frame->return_offset = (uint16_t)(INSTRUCTION_SIZE + oparg);
             gen_frame->previous = frame;
+             gen_frame->vault_prev_color = tstate->vault_color;
+            PyCodeObject *gen_code = _PyFrame_GetCode(gen_frame);
+            if ((gen_code->co_vault_color & PYVAULT_CODE_COLOR_FLAG) != 0) {
+                tstate->vault_color = (uint16_t)(gen_code->co_vault_color & PYVAULT_CODE_COLOR_MASK);
+            }
         }
 
         macro(SEND_GEN) =
@@ -1381,6 +1386,10 @@ dummy_func(
             gen->gi_exc_state.previous_item = NULL;
             _Py_LeaveRecursiveCallPy(tstate);
             _PyInterpreterFrame *gen_frame = frame;
+            PyCodeObject *gen_code = _PyFrame_GetCode(gen_frame);
+            if ((gen_code->co_vault_color & PYVAULT_CODE_COLOR_FLAG) != 0) {
+                tstate->vault_color = gen_frame->vault_prev_color;
+            }
             frame = tstate->current_frame = frame->previous;
             gen_frame->previous = NULL;
             /* We don't know which of these is relevant here, so keep them equal */
@@ -1654,10 +1663,16 @@ dummy_func(
             ERROR_IF(err);
         }
 
-        macro(STORE_ATTR) = _SPECIALIZE_STORE_ATTR + unused/3 + _STORE_ATTR;
+        macro(STORE_ATTR) = _SPECIALIZE_STORE_ATTR + unused/3 + _PYVAULT_CHECK_ACCESS + _STORE_ATTR;
 
         inst(DELETE_ATTR, (owner --)) {
             PyObject *name = GETITEM(FRAME_CO_NAMES, oparg);
+            if (!PyStackRef_IsNullOrInt(owner)) {
+                unsigned short current_color = tstate ? tstate->vault_color : 0;
+                if (!PyVault_CheckAccessColor(PyStackRef_AsPyObjectBorrow(owner), current_color)) {
+                    ERROR_NO_POP();
+                }
+            }
             int err = PyObject_DelAttr(PyStackRef_AsPyObjectBorrow(owner), name);
             PyStackRef_CLOSE(owner);
             ERROR_IF(err);
@@ -2171,6 +2186,10 @@ dummy_func(
             PyObject *global_super = PyStackRef_AsPyObjectBorrow(global_super_st);
             PyObject *class = PyStackRef_AsPyObjectBorrow(class_st);
             PyObject *self = PyStackRef_AsPyObjectBorrow(self_st);
+            unsigned short current_color = tstate ? tstate->vault_color : 0;
+            if (!PyVault_CheckAccessColor(self, current_color)) {
+                ERROR_NO_POP();
+            }
 
             if (opcode == INSTRUMENTED_LOAD_SUPER_ATTR) {
                 PyObject *arg = oparg & 2 ? class : &_PyInstrumentation_MISSING;
@@ -2222,6 +2241,10 @@ dummy_func(
             PyObject *self = PyStackRef_AsPyObjectBorrow(self_st);
 
             assert(!(oparg & 1));
+            unsigned short current_color = tstate ? tstate->vault_color : 0;
+            if (!PyVault_CheckAccessColor(self, current_color)) {
+                ERROR_NO_POP();
+            }
             DEOPT_IF(global_super != (PyObject *)&PySuper_Type);
             DEOPT_IF(!PyType_Check(class));
             STAT_INC(LOAD_SUPER_ATTR, hit);
@@ -2238,6 +2261,10 @@ dummy_func(
             PyObject *self = PyStackRef_AsPyObjectBorrow(self_st);
 
             assert(oparg & 1);
+            unsigned short current_color = tstate ? tstate->vault_color : 0;
+            if (!PyVault_CheckAccessColor(self, current_color)) {
+                ERROR_NO_POP();
+            }
             DEOPT_IF(global_super != (PyObject *)&PySuper_Type);
             DEOPT_IF(!PyType_Check(class));
             STAT_INC(LOAD_SUPER_ATTR, hit);
@@ -2330,7 +2357,20 @@ dummy_func(
         macro(LOAD_ATTR) =
             _SPECIALIZE_LOAD_ATTR +
             unused/8 +
+            _PYVAULT_CHECK_ACCESS +
             _LOAD_ATTR;
+
+        op(_PYVAULT_CHECK_ACCESS, (owner -- owner)) {
+            if (!PyStackRef_IsNullOrInt(owner)) {
+                PyObject *owner_o = PyStackRef_AsPyObjectBorrow(owner);
+                if (PyVault_GET_OBJ_TAG(owner_o) != 0) {
+                    unsigned short current_color = tstate ? tstate->vault_color : 0;
+                    if (!PyVault_CheckAccessColor(owner_o, current_color)) {
+                        ERROR_NO_POP();
+                    }
+                }
+            }
+        }
 
         op(_GUARD_TYPE_VERSION, (type_version/2, owner -- owner)) {
             PyTypeObject *tp = Py_TYPE(PyStackRef_AsPyObjectBorrow(owner));
@@ -2377,6 +2417,7 @@ dummy_func(
             unused/1 + // Skip over the counter
             _GUARD_TYPE_VERSION +
             _CHECK_MANAGED_OBJECT_HAS_VALUES +
+            _PYVAULT_CHECK_ACCESS +
             _LOAD_ATTR_INSTANCE_VALUE +
             unused/5 +
             _PUSH_NULL_CONDITIONAL;
@@ -2407,6 +2448,7 @@ dummy_func(
 
         macro(LOAD_ATTR_MODULE) =
             unused/1 +
+            _PYVAULT_CHECK_ACCESS +
             _LOAD_ATTR_MODULE +
             unused/5 +
             _PUSH_NULL_CONDITIONAL;
@@ -2453,6 +2495,7 @@ dummy_func(
         macro(LOAD_ATTR_WITH_HINT) =
             unused/1 +
             _GUARD_TYPE_VERSION +
+            _PYVAULT_CHECK_ACCESS +
             _LOAD_ATTR_WITH_HINT +
             unused/5 +
             _PUSH_NULL_CONDITIONAL;
@@ -2476,6 +2519,7 @@ dummy_func(
         macro(LOAD_ATTR_SLOT) =
             unused/1 +
             _GUARD_TYPE_VERSION +
+            _PYVAULT_CHECK_ACCESS +
             _LOAD_ATTR_SLOT +  // NOTE: This action may also deopt
             unused/5 +
             _PUSH_NULL_CONDITIONAL;
@@ -2498,6 +2542,7 @@ dummy_func(
         macro(LOAD_ATTR_CLASS) =
             unused/1 +
             _CHECK_ATTR_CLASS +
+            _PYVAULT_CHECK_ACCESS +
             unused/2 +
             _LOAD_ATTR_CLASS +
             _PUSH_NULL_CONDITIONAL;
@@ -2506,6 +2551,7 @@ dummy_func(
             unused/1 +
             _CHECK_ATTR_CLASS +
             _GUARD_TYPE_VERSION +
+            _PYVAULT_CHECK_ACCESS +
             _LOAD_ATTR_CLASS +
             _PUSH_NULL_CONDITIONAL;
 
@@ -2528,6 +2574,7 @@ dummy_func(
             unused/1 +
             _CHECK_PEP_523 +
             _GUARD_TYPE_VERSION +
+            _PYVAULT_CHECK_ACCESS +
             unused/2 +
             _LOAD_ATTR_PROPERTY_FRAME +
             _SAVE_RETURN_OFFSET +
@@ -2535,6 +2582,12 @@ dummy_func(
 
         inst(LOAD_ATTR_GETATTRIBUTE_OVERRIDDEN, (unused/1, type_version/2, func_version/2, getattribute/4, owner -- unused)) {
             PyObject *owner_o = PyStackRef_AsPyObjectBorrow(owner);
+            if (!PyStackRef_IsNullOrInt(owner)) {
+                unsigned short current_color = tstate ? tstate->vault_color : 0;
+                if (!PyVault_CheckAccessColor(owner_o, current_color)) {
+                    ERROR_NO_POP();
+                }
+            }
 
             assert((oparg & 1) == 0);
             DEOPT_IF(tstate->interp->eval_frame);
@@ -2596,6 +2649,7 @@ dummy_func(
             unused/1 +
             _GUARD_TYPE_VERSION_AND_LOCK +
             _GUARD_DORV_NO_DICT +
+            _PYVAULT_CHECK_ACCESS +
             _STORE_ATTR_INSTANCE_VALUE;
 
         op(_STORE_ATTR_WITH_HINT, (hint/1, value, owner --)) {
@@ -2641,6 +2695,7 @@ dummy_func(
         macro(STORE_ATTR_WITH_HINT) =
             unused/1 +
             _GUARD_TYPE_VERSION +
+            _PYVAULT_CHECK_ACCESS +
             _STORE_ATTR_WITH_HINT;
 
         op(_STORE_ATTR_SLOT, (index/1, value, owner --)) {
@@ -2659,6 +2714,7 @@ dummy_func(
         macro(STORE_ATTR_SLOT) =
             unused/1 +
             _GUARD_TYPE_VERSION +
+            _PYVAULT_CHECK_ACCESS +
             _STORE_ATTR_SLOT;
 
         family(COMPARE_OP, INLINE_CACHE_ENTRIES_COMPARE_OP) = {
@@ -3639,6 +3695,7 @@ dummy_func(
             _GUARD_TYPE_VERSION +
             _GUARD_DORV_VALUES_INST_ATTR_FROM_DICT +
             _GUARD_KEYS_VERSION +
+            _PYVAULT_CHECK_ACCESS +
             _LOAD_ATTR_METHOD_WITH_VALUES;
 
         op(_LOAD_ATTR_METHOD_NO_DICT, (descr/4, owner -- attr, self)) {
@@ -3655,6 +3712,7 @@ dummy_func(
         macro(LOAD_ATTR_METHOD_NO_DICT) =
             unused/1 +
             _GUARD_TYPE_VERSION +
+            _PYVAULT_CHECK_ACCESS +
             unused/2 +
             _LOAD_ATTR_METHOD_NO_DICT;
 
@@ -3671,6 +3729,7 @@ dummy_func(
             _GUARD_TYPE_VERSION +
             _GUARD_DORV_VALUES_INST_ATTR_FROM_DICT +
             _GUARD_KEYS_VERSION +
+            _PYVAULT_CHECK_ACCESS +
             _LOAD_ATTR_NONDESCRIPTOR_WITH_VALUES;
 
         op(_LOAD_ATTR_NONDESCRIPTOR_NO_DICT, (descr/4, owner -- attr)) {
@@ -3685,6 +3744,7 @@ dummy_func(
         macro(LOAD_ATTR_NONDESCRIPTOR_NO_DICT) =
             unused/1 +
             _GUARD_TYPE_VERSION +
+            _PYVAULT_CHECK_ACCESS +
             unused/2 +
             _LOAD_ATTR_NONDESCRIPTOR_NO_DICT;
 
@@ -3709,6 +3769,7 @@ dummy_func(
             unused/1 +
             _GUARD_TYPE_VERSION +
             _CHECK_ATTR_METHOD_LAZY_DICT +
+            _PYVAULT_CHECK_ACCESS +
             unused/1 +
             _LOAD_ATTR_METHOD_LAZY_DICT;
 
@@ -5004,6 +5065,10 @@ dummy_func(
             gen_frame->owner = FRAME_OWNED_BY_GENERATOR;
             _Py_LeaveRecursiveCallPy(tstate);
             _PyInterpreterFrame *prev = frame->previous;
+            PyCodeObject *code = _PyFrame_GetCode(frame);
+            if ((code->co_vault_color & PYVAULT_CODE_COLOR_FLAG) != 0) {
+                tstate->vault_color = frame->vault_prev_color;
+            }
             _PyThreadState_PopFrame(tstate, frame);
             frame = tstate->current_frame = prev;
             LOAD_IP(frame->return_offset);

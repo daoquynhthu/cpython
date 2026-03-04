@@ -109,6 +109,7 @@ Interpreter improvements:
 * :ref:`Free-threaded mode improvements <whatsnew314-free-threaded-cpython>`
 * :ref:`Improved error messages <whatsnew314-improved-error-messages>`
 * :ref:`Incremental garbage collection <whatsnew314-incremental-gc>`
+* :ref:`PyVault security isolation <whatsnew314-pyvault>`
 
 Significant improvements in the standard library:
 
@@ -517,6 +518,21 @@ Dino Viehland, Nathan Goldbaum, Ralf Gommers, Lysandros Nikolaou, Kumar Aditya,
 Edgar Margffoy, and many others.
 Some of these contributors are employed by Meta, which has continued to provide
 significant engineering resources to support this project.)
+
+.. _whatsnew314-pyvault:
+
+PyVault security isolation
+--------------------------
+
+PyVault adds a color-based isolation model for objects and code execution.
+Each thread has an active color, and objects, code objects, and modules can be
+tagged with a security color. Attribute access across mismatched colors raises
+``PermissionError``. Module sealing recursively tags module members to enforce
+access control.
+
+The new APIs are exposed on :mod:`sys`: :func:`sys.set_color`,
+:func:`sys.get_color`, :func:`sys.set_obj_tag`, :func:`sys.get_obj_tag`,
+:func:`sys.set_code_color`, :func:`sys.get_code_color`, and :func:`sys.seal`.
 
 
 .. _whatsnew314-improved-error-messages:

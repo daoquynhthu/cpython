@@ -49,6 +49,8 @@ extern void _PyDebugAllocatorStats(FILE *out, const char *block_name,
 
 extern void _PyObject_DebugTypeStats(FILE *out);
 
+PyAPI_FUNC(int) PyVault_CheckAccessColor(PyObject *op, unsigned short current_color);
+
 #ifdef Py_TRACE_REFS
 // Forget a reference registered by _Py_NewReference(). Function called by
 // _Py_Dealloc().

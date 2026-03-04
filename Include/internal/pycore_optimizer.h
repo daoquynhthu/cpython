@@ -70,6 +70,9 @@ typedef struct {
     uint32_t target;
     _Py_BackoffCounter temperature;
     struct _PyExecutorObject *executor;
+    uint16_t hot_count;
+    uint8_t patched;
+    uint8_t pad;
 } _PyExitData;
 
 typedef struct _PyExecutorObject {
@@ -119,6 +122,7 @@ PyAPI_FUNC(void) _Py_Executors_InvalidateCold(PyInterpreterState *interp);
 
 // This is the length of the trace we project initially.
 #define UOP_MAX_TRACE_LENGTH 800
+#define UOP_FAST_TRACE_LENGTH 200
 
 #define TRACE_STACK_SIZE 5
 

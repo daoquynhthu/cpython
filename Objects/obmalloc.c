@@ -7,6 +7,7 @@
 #include "pycore_obmalloc_init.h"
 #include "pycore_pyerrors.h"      // _Py_FatalErrorFormat()
 #include "pycore_pymem.h"
+#include "pycore_pylifecycle.h"
 #include "pycore_pystate.h"       // _PyInterpreterState_GET
 #include "pycore_stats.h"         // OBJECT_STAT_INC_COND()
 
@@ -1536,6 +1537,8 @@ typedef struct _obmalloc_state OMState;
 static struct _obmalloc_state obmalloc_state_main;
 static bool obmalloc_state_initialized;
 
+static long vault_debug_count = 0;
+
 static inline int
 has_own_state(PyInterpreterState *interp)
 {
@@ -1547,18 +1550,51 @@ has_own_state(PyInterpreterState *interp)
 static inline OMState *
 get_state(void)
 {
-    PyInterpreterState *interp = _PyInterpreterState_GET();
+    PyThreadState *tstate = _PyThreadState_GET();
+    if (tstate == NULL) {
+        return &obmalloc_state_main;
+    }
+    PyInterpreterState *interp = tstate->interp;
     assert(interp->obmalloc != NULL); // otherwise not initialized or freed
     return interp->obmalloc;
 }
 
-// These macros all rely on a local "state" variable.
-#define usedpools (state->pools.used)
+extern int _PyVault_Enabled;
+
+/* PyVault: Helper to get current thread color */
+static inline uint16_t
+get_vault_color(void)
+{
+    if (!_PyVault_Enabled) {
+        return 0;
+    }
+    PyThreadState *tstate = _PyThreadState_GET();
+    if (tstate == NULL) {
+        return 0;
+    }
+    PyInterpreterState *interp = tstate->interp;
+    if (interp == NULL) {
+        return 0;
+    }
+    if (_Py_IsInterpreterFinalizing(interp)) {
+        return 0;
+    }
+    uint16_t color = (uint16_t)tstate->vault_color;
+    if (color >= PYVAULT_COLORS) {
+        return 0;
+    }
+    return color;
+}
+#define USED_POOLS(color) (state->pools.colors[color].used)
+#define USABLE_ARENAS(color) (state->mgmt.color_usable_arenas[color])
+#define NFP2LASTA(color) (state->mgmt.color_nfp2lasta[color])
+
+#define usedpools USED_POOLS(get_vault_color())
 #define allarenas (state->mgmt.arenas)
 #define maxarenas (state->mgmt.maxarenas)
 #define unused_arena_objects (state->mgmt.unused_arena_objects)
-#define usable_arenas (state->mgmt.usable_arenas)
-#define nfp2lasta (state->mgmt.nfp2lasta)
+#define usable_arenas USABLE_ARENAS(get_vault_color())
+#define nfp2lasta NFP2LASTA(get_vault_color())
 #define narenas_currently_allocated (state->mgmt.narenas_currently_allocated)
 #define ntimes_arena_allocated (state->mgmt.ntimes_arena_allocated)
 #define narenas_highwater (state->mgmt.narenas_highwater)
@@ -1765,6 +1801,9 @@ arena_map_get(OMState *state, pymem_block *p, int create)
     int i1 = MAP_TOP_INDEX(p);
     if (arena_map_root.ptrs[i1] == NULL) {
         if (!create) {
+            if (_PyVault_Enabled) {
+                fprintf(stderr, "PyVault Debug: arena_map_get miss i1=%d p=%p root=%p\n", i1, p, (void *)&arena_map_root);
+            }
             return NULL;
         }
         arena_map_mid_t *n = PyMem_RawCalloc(1, sizeof(arena_map_mid_t));
@@ -1777,6 +1816,9 @@ arena_map_get(OMState *state, pymem_block *p, int create)
     int i2 = MAP_MID_INDEX(p);
     if (arena_map_root.ptrs[i1]->ptrs[i2] == NULL) {
         if (!create) {
+            if (_PyVault_Enabled) {
+                fprintf(stderr, "PyVault Debug: arena_map_get miss i1=%d i2=%d p=%p mid=%p\n", i1, i2, p, (void *)arena_map_root.ptrs[i1]);
+            }
             return NULL;
         }
         arena_map_bot_t *n = PyMem_RawCalloc(1, sizeof(arena_map_bot_t));
@@ -1830,9 +1872,11 @@ arena_map_mark_used(OMState *state, uintptr_t arena_base, int is_used)
     }
     int i3 = MAP_BOT_INDEX((pymem_block *)arena_base);
     int32_t tail = (int32_t)(arena_base & ARENA_SIZE_MASK);
+    uint16_t color = is_used ? get_vault_color() : 0;
     if (tail == 0) {
         /* is ideal arena address */
         n_hi->arenas[i3].tail_hi = is_used ? -1 : 0;
+        n_hi->arenas[i3].vault_tag = color;
     }
     else {
         /* arena_base address is not ideal (aligned to arena size) and
@@ -1842,6 +1886,7 @@ arena_map_mark_used(OMState *state, uintptr_t arena_base, int is_used)
          * again (do the full tree traversal).
          */
         n_hi->arenas[i3].tail_hi = is_used ? tail : 0;
+        n_hi->arenas[i3].vault_tag = color;
         uintptr_t arena_base_next = arena_base + ARENA_SIZE;
         /* If arena_base is a legit arena address, so is arena_base_next - 1
          * (last address in arena).  If arena_base_next overflows then it
@@ -1853,10 +1898,12 @@ arena_map_mark_used(OMState *state, uintptr_t arena_base, int is_used)
         if (n_lo == NULL) {
             assert(is_used); /* otherwise should already exist */
             n_hi->arenas[i3].tail_hi = 0;
+            n_hi->arenas[i3].vault_tag = 0;
             return 0; /* failed to allocate space for node */
         }
         int i3_next = MAP_BOT_INDEX(arena_base_next);
         n_lo->arenas[i3_next].tail_lo = is_used ? tail : 0;
+        n_lo->arenas[i3_next].vault_tag = color;
     }
     return 1;
 }
@@ -1875,7 +1922,31 @@ arena_map_is_used(OMState *state, pymem_block *p)
     int32_t hi = n->arenas[i3].tail_hi;
     int32_t lo = n->arenas[i3].tail_lo;
     int32_t tail = (int32_t)(AS_UINT(p) & ARENA_SIZE_MASK);
-    return (tail < lo) || (tail >= hi && hi != 0);
+    int used = (tail < lo) || (tail >= hi && hi != 0);
+    if (used) {
+        // fprintf(stderr, "PyVault Debug: arena_map_is_used(%p) = %d, i3 = %d, hi = %d, lo = %d, tail = %d\n", p, used, i3, hi, lo, tail);
+    }
+    return used;
+}
+
+/* PyVault: Get the security color of the arena containing pointer 'p'.
+ * Returns 0 if not an obmalloc address. */
+static uint16_t
+arena_map_get_tag(OMState *state, pymem_block *p)
+{
+    arena_map_bot_t *n = arena_map_get(state, p, 0);
+    if (n == NULL) {
+        return 0;
+    }
+    int i3 = MAP_BOT_INDEX(p);
+    /* ARENA_BITS must be < 32 so that the tail is a non-negative int32_t. */
+    int32_t hi = n->arenas[i3].tail_hi;
+    int32_t lo = n->arenas[i3].tail_lo;
+    int32_t tail = (int32_t)(AS_UINT(p) & ARENA_SIZE_MASK);
+    if ((tail < lo) || (tail >= hi && hi != 0)) {
+        return n->arenas[i3].vault_tag;
+    }
+    return 0;
 }
 
 /* end of radix tree logic */
@@ -1894,6 +1965,10 @@ new_arena(OMState *state)
     struct arena_object* arenaobj;
     uint excess;        /* number of bytes above pool alignment */
     void *address;
+    uint i;
+    uint numarenas;
+    size_t nbytes;
+    struct arena_object *old_allarenas;
 
     int debug_stats = _PyRuntime.obmalloc.dump_debug_stats;
     if (debug_stats == -1) {
@@ -1906,10 +1981,6 @@ new_arena(OMState *state)
     }
 
     if (unused_arena_objects == NULL) {
-        uint i;
-        uint numarenas;
-        size_t nbytes;
-
         /* Double the number of arena objects on each allocation.
          * Note that it's possible for `numarenas` to overflow.
          */
@@ -1921,10 +1992,45 @@ new_arena(OMState *state)
             return NULL;                /* overflow */
 #endif
         nbytes = numarenas * sizeof(*allarenas);
+        old_allarenas = allarenas;
         arenaobj = (struct arena_object *)PyMem_RawRealloc(allarenas, nbytes);
         if (arenaobj == NULL)
             return NULL;
         allarenas = arenaobj;
+
+        if (arenaobj != old_allarenas && old_allarenas != NULL) {
+            /* All pointers to arena objects must be updated. */
+            ptrdiff_t offset = (char *)arenaobj - (char *)old_allarenas;
+
+            for (i = 0; i < PYVAULT_COLORS; i++) {
+                if (USABLE_ARENAS(i) != NULL) {
+                    USABLE_ARENAS(i) =
+                        (struct arena_object *)((char *)USABLE_ARENAS(i) + offset);
+                }
+                for (uint j = 0; j <= MAX_POOLS_IN_ARENA; j++) {
+                    if (NFP2LASTA(i)[j] != NULL) {
+                        NFP2LASTA(i)[j] =
+                            (struct arena_object *)((char *)NFP2LASTA(i)[j] + offset);
+                    }
+                }
+            }
+
+            if (unused_arena_objects != NULL) {
+                unused_arena_objects =
+                    (struct arena_object *)((char *)unused_arena_objects + offset);
+            }
+
+            for (i = 0; i < maxarenas; i++) {
+                if (allarenas[i].nextarena != NULL) {
+                    allarenas[i].nextarena =
+                        (struct arena_object *)((char *)allarenas[i].nextarena + offset);
+                }
+                if (allarenas[i].prevarena != NULL) {
+                    allarenas[i].prevarena =
+                        (struct arena_object *)((char *)allarenas[i].prevarena + offset);
+                }
+            }
+        }
 
         /* We might need to fix pointers that were copied.  However,
          * new_arena only gets called when all the pages in the
@@ -1932,12 +2038,15 @@ new_arena(OMState *state)
          * into the old array. Thus, we don't have to worry about
          * invalid pointers.  Just to be sure, some asserts:
          */
-        assert(usable_arenas == NULL);
+        /* PyVault: In multi-color mode, other colors might still have usable arenas.
+         * So we don't assert(usable_arenas == NULL) here anymore, instead we fixed them above.
+         */
         assert(unused_arena_objects == NULL);
 
         /* Put the new arenas on the unused_arena_objects list. */
         for (i = maxarenas; i < numarenas; ++i) {
             allarenas[i].address = 0;              /* mark as unassociated */
+            allarenas[i].prevarena = NULL;         /* PyVault: initialize prevarena */
             allarenas[i].nextarena = i < numarenas - 1 ?
                                         &allarenas[i+1] : NULL;
         }
@@ -1953,6 +2062,7 @@ new_arena(OMState *state)
     unused_arena_objects = arenaobj->nextarena;
     assert(arenaobj->address == 0);
     address = _PyObject_Arena.alloc(_PyObject_Arena.ctx, ARENA_SIZE);
+
 #if WITH_PYMALLOC_RADIX_TREE
     if (address != NULL) {
         if (!arena_map_mark_used(state, (uintptr_t)address, 1)) {
@@ -1971,6 +2081,7 @@ new_arena(OMState *state)
         return NULL;
     }
     arenaobj->address = (uintptr_t)address;
+    arenaobj->vault_tag = get_vault_color(); // PyVault: Tag the arena with current color
 
     ++narenas_currently_allocated;
     ++ntimes_arena_allocated;
@@ -2000,7 +2111,8 @@ new_arena(OMState *state)
 static bool
 address_in_range(OMState *state, void *p, poolp Py_UNUSED(pool))
 {
-    return arena_map_is_used(state, p);
+    bool used = arena_map_is_used(state, p);
+    return used;
 }
 #else
 /*
@@ -2128,55 +2240,56 @@ allocate_from_new_pool(OMState *state, uint size)
     /* There isn't a pool of the right size class immediately
      * available:  use a free pool.
      */
-    if (UNLIKELY(usable_arenas == NULL)) {
+    uint16_t color = get_vault_color();
+    if (UNLIKELY(USABLE_ARENAS(color) == NULL)) {
         /* No arena has a free pool:  allocate a new arena. */
 #ifdef WITH_MEMORY_LIMITS
         if (narenas_currently_allocated >= MAX_ARENAS) {
             return NULL;
         }
 #endif
-        usable_arenas = new_arena(state);
-        if (usable_arenas == NULL) {
+        USABLE_ARENAS(color) = new_arena(state);
+        if (USABLE_ARENAS(color) == NULL) {
             return NULL;
         }
-        usable_arenas->nextarena = usable_arenas->prevarena = NULL;
-        assert(nfp2lasta[usable_arenas->nfreepools] == NULL);
-        nfp2lasta[usable_arenas->nfreepools] = usable_arenas;
+        USABLE_ARENAS(color)->nextarena = USABLE_ARENAS(color)->prevarena = NULL;
+        assert(NFP2LASTA(color)[USABLE_ARENAS(color)->nfreepools] == NULL);
+        NFP2LASTA(color)[USABLE_ARENAS(color)->nfreepools] = USABLE_ARENAS(color);
     }
-    assert(usable_arenas->address != 0);
+    assert(USABLE_ARENAS(color)->address != 0);
 
     /* This arena already had the smallest nfreepools value, so decreasing
      * nfreepools doesn't change that, and we don't need to rearrange the
      * usable_arenas list.  However, if the arena becomes wholly allocated,
      * we need to remove its arena_object from usable_arenas.
      */
-    assert(usable_arenas->nfreepools > 0);
-    if (nfp2lasta[usable_arenas->nfreepools] == usable_arenas) {
+    assert(USABLE_ARENAS(color)->nfreepools > 0);
+    if (NFP2LASTA(color)[USABLE_ARENAS(color)->nfreepools] == USABLE_ARENAS(color)) {
         /* It's the last of this size, so there won't be any. */
-        nfp2lasta[usable_arenas->nfreepools] = NULL;
+        NFP2LASTA(color)[USABLE_ARENAS(color)->nfreepools] = NULL;
     }
     /* If any free pools will remain, it will be the new smallest. */
-    if (usable_arenas->nfreepools > 1) {
-        assert(nfp2lasta[usable_arenas->nfreepools - 1] == NULL);
-        nfp2lasta[usable_arenas->nfreepools - 1] = usable_arenas;
+    if (USABLE_ARENAS(color)->nfreepools > 1) {
+        assert(NFP2LASTA(color)[USABLE_ARENAS(color)->nfreepools - 1] == NULL);
+        NFP2LASTA(color)[USABLE_ARENAS(color)->nfreepools - 1] = USABLE_ARENAS(color);
     }
 
     /* Try to get a cached free pool. */
-    poolp pool = usable_arenas->freepools;
+    poolp pool = USABLE_ARENAS(color)->freepools;
     if (LIKELY(pool != NULL)) {
         /* Unlink from cached pools. */
-        usable_arenas->freepools = pool->nextpool;
-        usable_arenas->nfreepools--;
-        if (UNLIKELY(usable_arenas->nfreepools == 0)) {
+        USABLE_ARENAS(color)->freepools = pool->nextpool;
+        USABLE_ARENAS(color)->nfreepools--;
+        if (UNLIKELY(USABLE_ARENAS(color)->nfreepools == 0)) {
             /* Wholly allocated:  remove. */
-            assert(usable_arenas->freepools == NULL);
-            assert(usable_arenas->nextarena == NULL ||
-                   usable_arenas->nextarena->prevarena ==
-                   usable_arenas);
-            usable_arenas = usable_arenas->nextarena;
-            if (usable_arenas != NULL) {
-                usable_arenas->prevarena = NULL;
-                assert(usable_arenas->address != 0);
+            assert(USABLE_ARENAS(color)->freepools == NULL);
+            assert(USABLE_ARENAS(color)->nextarena == NULL ||
+                   USABLE_ARENAS(color)->nextarena->prevarena ==
+                   USABLE_ARENAS(color));
+            USABLE_ARENAS(color) = USABLE_ARENAS(color)->nextarena;
+            if (USABLE_ARENAS(color) != NULL) {
+                USABLE_ARENAS(color)->prevarena = NULL;
+                assert(USABLE_ARENAS(color)->address != 0);
             }
         }
         else {
@@ -2185,41 +2298,41 @@ allocate_from_new_pool(OMState *state, uint size)
              * off all the arena's pools for the first
              * time.
              */
-            assert(usable_arenas->freepools != NULL ||
-                   usable_arenas->pool_address <=
-                   (pymem_block*)usable_arenas->address +
+            assert(USABLE_ARENAS(color)->freepools != NULL ||
+                   USABLE_ARENAS(color)->pool_address <=
+                   (pymem_block*)USABLE_ARENAS(color)->address +
                        ARENA_SIZE - POOL_SIZE);
         }
     }
     else {
         /* Carve off a new pool. */
-        assert(usable_arenas->nfreepools > 0);
-        assert(usable_arenas->freepools == NULL);
-        pool = (poolp)usable_arenas->pool_address;
-        assert((pymem_block*)pool <= (pymem_block*)usable_arenas->address +
+        assert(USABLE_ARENAS(color)->nfreepools > 0);
+        assert(USABLE_ARENAS(color)->freepools == NULL);
+        pool = (poolp)USABLE_ARENAS(color)->pool_address;
+        assert((pymem_block*)pool <= (pymem_block*)USABLE_ARENAS(color)->address +
                                  ARENA_SIZE - POOL_SIZE);
-        pool->arenaindex = (uint)(usable_arenas - allarenas);
-        assert(&allarenas[pool->arenaindex] == usable_arenas);
+        pool->arenaindex = (uint)(USABLE_ARENAS(color) - allarenas);
+        assert(&allarenas[pool->arenaindex] == USABLE_ARENAS(color));
         pool->szidx = DUMMY_SIZE_IDX;
-        usable_arenas->pool_address += POOL_SIZE;
-        --usable_arenas->nfreepools;
+        USABLE_ARENAS(color)->pool_address += POOL_SIZE;
+        --USABLE_ARENAS(color)->nfreepools;
 
-        if (usable_arenas->nfreepools == 0) {
-            assert(usable_arenas->nextarena == NULL ||
-                   usable_arenas->nextarena->prevarena ==
-                   usable_arenas);
+        if (USABLE_ARENAS(color)->nfreepools == 0) {
+            assert(USABLE_ARENAS(color)->nextarena == NULL ||
+                   USABLE_ARENAS(color)->nextarena->prevarena ==
+                   USABLE_ARENAS(color));
             /* Unlink the arena:  it is completely allocated. */
-            usable_arenas = usable_arenas->nextarena;
-            if (usable_arenas != NULL) {
-                usable_arenas->prevarena = NULL;
-                assert(usable_arenas->address != 0);
+            USABLE_ARENAS(color) = USABLE_ARENAS(color)->nextarena;
+            if (USABLE_ARENAS(color) != NULL) {
+                USABLE_ARENAS(color)->prevarena = NULL;
+                assert(USABLE_ARENAS(color)->address != 0);
             }
         }
     }
 
     /* Frontlink to used pools. */
     pymem_block *bp;
-    poolp next = usedpools[size + size]; /* == prev */
+    poolp next = USED_POOLS(color)[size + size]; /* == prev */
     pool->nextpool = next;
     pool->prevpool = next;
     next->nextpool = pool;
@@ -2278,7 +2391,8 @@ pymalloc_alloc(OMState *state, void *Py_UNUSED(ctx), size_t nbytes)
     }
 
     uint size = (uint)(nbytes - 1) >> ALIGNMENT_SHIFT;
-    poolp pool = usedpools[size + size];
+    uint16_t color = get_vault_color();
+    poolp pool = USED_POOLS(color)[size + size];
     pymem_block *bp;
 
     if (LIKELY(pool != pool->nextpool)) {
@@ -2349,8 +2463,10 @@ insert_to_usedpool(OMState *state, poolp pool)
 {
     assert(pool->ref.count > 0);            /* else the pool is empty */
 
+    struct arena_object *ao = &allarenas[pool->arenaindex];
+    uint16_t color = ao->vault_tag;
     uint size = pool->szidx;
-    poolp next = usedpools[size + size];
+    poolp next = USED_POOLS(color)[size + size];
     poolp prev = next->prevpool;
 
     /* insert pool before next:   prev <-> pool <-> next */
@@ -2372,6 +2488,7 @@ insert_to_freepool(OMState *state, poolp pool)
      * list, and pool->prevpool isn't used there.
      */
     struct arena_object *ao = &allarenas[pool->arenaindex];
+    uint16_t color = ao->vault_tag;
     pool->nextpool = ao->freepools;
     ao->freepools = pool;
     uint nf = ao->nfreepools;
@@ -2379,7 +2496,7 @@ insert_to_freepool(OMState *state, poolp pool)
      * nfp2lasta[nf] needs to change.  Caution:  if nf is 0, there
      * are no arenas in usable_arenas with that value.
      */
-    struct arena_object* lastnf = nfp2lasta[nf];
+    struct arena_object* lastnf = NFP2LASTA(color)[nf];
     assert((nf == 0 && lastnf == NULL) ||
            (nf > 0 &&
             lastnf != NULL &&
@@ -2388,7 +2505,7 @@ insert_to_freepool(OMState *state, poolp pool)
              nf < lastnf->nextarena->nfreepools)));
     if (lastnf == ao) {  /* it is the rightmost */
         struct arena_object* p = ao->prevarena;
-        nfp2lasta[nf] = (p != NULL && p->nfreepools == nf) ? p : NULL;
+        NFP2LASTA(color)[nf] = (p != NULL && p->nfreepools == nf) ? p : NULL;
     }
     ao->nfreepools = ++nf;
 
@@ -2421,9 +2538,9 @@ insert_to_freepool(OMState *state, poolp pool)
          * usable_arenas pointer.
          */
         if (ao->prevarena == NULL) {
-            usable_arenas = ao->nextarena;
-            assert(usable_arenas == NULL ||
-                   usable_arenas->address != 0);
+            USABLE_ARENAS(color) = ao->nextarena;
+            assert(USABLE_ARENAS(color) == NULL ||
+                   USABLE_ARENAS(color)->address != 0);
         }
         else {
             assert(ao->prevarena->nextarena == ao);
@@ -2462,14 +2579,14 @@ insert_to_freepool(OMState *state, poolp pool)
          * ao->nfreepools was 0 before, ao isn't
          * currently on the usable_arenas list.
          */
-        ao->nextarena = usable_arenas;
+        ao->nextarena = USABLE_ARENAS(color);
         ao->prevarena = NULL;
-        if (usable_arenas)
-            usable_arenas->prevarena = ao;
-        usable_arenas = ao;
-        assert(usable_arenas->address != 0);
-        if (nfp2lasta[1] == NULL) {
-            nfp2lasta[1] = ao;
+        if (USABLE_ARENAS(color))
+            USABLE_ARENAS(color)->prevarena = ao;
+        USABLE_ARENAS(color) = ao;
+        assert(USABLE_ARENAS(color)->address != 0);
+        if (NFP2LASTA(color)[1] == NULL) {
+            NFP2LASTA(color)[1] = ao;
         }
 
         return;
@@ -2483,8 +2600,8 @@ insert_to_freepool(OMState *state, poolp pool)
      * approach allowed a lot more memory to be freed.
      */
     /* If this is the only arena with nf, record that. */
-    if (nfp2lasta[nf] == NULL) {
-        nfp2lasta[nf] = ao;
+    if (NFP2LASTA(color)[nf] == NULL) {
+        NFP2LASTA(color)[nf] = ao;
     } /* else the rightmost with nf doesn't change */
     /* If this was the rightmost of the old size, it remains in place. */
     if (ao == lastnf) {
@@ -2508,8 +2625,8 @@ insert_to_freepool(OMState *state, poolp pool)
     }
     else {
         /* ao is at the head of the list */
-        assert(usable_arenas == ao);
-        usable_arenas = ao->nextarena;
+        assert(USABLE_ARENAS(color) == ao);
+        USABLE_ARENAS(color) = ao->nextarena;
     }
     ao->nextarena->prevarena = ao->prevarena;
     /* And insert after lastnf. */
@@ -2523,7 +2640,7 @@ insert_to_freepool(OMState *state, poolp pool)
     assert(ao->nextarena == NULL || nf <= ao->nextarena->nfreepools);
     assert(ao->prevarena == NULL || nf > ao->prevarena->nfreepools);
     assert(ao->nextarena == NULL || ao->nextarena->prevarena == ao);
-    assert((usable_arenas == ao && ao->prevarena == NULL)
+    assert((USABLE_ARENAS(color) == ao && ao->prevarena == NULL)
            || ao->prevarena->nextarena == ao);
 }
 
@@ -2545,7 +2662,8 @@ pymalloc_free(OMState *state, void *Py_UNUSED(ctx), void *p)
     if (UNLIKELY(!address_in_range(state, p, pool))) {
         return 0;
     }
-    /* We allocated this address. */
+
+    /* We allocated this address and colors match. */
 
     /* Link p to the start of the pool's freeblock list.  Since
      * the pool had at least the p block outstanding, the pool
@@ -2648,7 +2766,7 @@ pymalloc_realloc(OMState *state, void *ctx,
         return 0;
     }
 
-    /* pymalloc is in charge of this block */
+    /* pymalloc is in charge of this block and colors match */
     size = INDEX2SIZE(pool->szidx);
     if (nbytes <= size) {
         /* The block is staying the same or shrinking.
@@ -3323,9 +3441,11 @@ init_obmalloc_pools(PyInterpreterState *interp)
 {
     // initialize the obmalloc->pools structure.  This must be done
     // before the obmalloc alloc/free functions can be called.
-    poolp temp[OBMALLOC_USED_POOLS_SIZE] =
-        _obmalloc_pools_INIT(interp->obmalloc->pools);
-    memcpy(&interp->obmalloc->pools.used, temp, sizeof(temp));
+    for (int i = 0; i < PYVAULT_COLORS; i++) {
+        poolp temp[OBMALLOC_USED_POOLS_SIZE] =
+            _obmalloc_pools_INIT(interp->obmalloc->pools.colors[i]);
+        memcpy(&interp->obmalloc->pools.colors[i].used, temp, sizeof(temp));
+    }
 }
 #endif /* WITH_PYMALLOC */
 

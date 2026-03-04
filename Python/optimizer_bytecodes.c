@@ -57,6 +57,8 @@ dummy_func(void) {
     JitOptSymbol *left;
     JitOptSymbol *right;
     JitOptSymbol *value;
+    JitOptSymbol *value1;
+    JitOptSymbol *value2;
     JitOptSymbol *res;
     JitOptSymbol *iter;
     JitOptSymbol *top;
@@ -88,6 +90,20 @@ dummy_func(void) {
 
     op(_LOAD_FAST_BORROW, (-- value)) {
         value = GETLOCAL(oparg);
+    }
+
+    op(_LOAD_FAST_LOAD_FAST, (-- value1, value2)) {
+        uint32_t oparg_hi = oparg >> 4;
+        uint32_t oparg_lo = oparg & 15;
+        value1 = GETLOCAL(oparg_hi);
+        value2 = GETLOCAL(oparg_lo);
+    }
+
+    op(_LOAD_FAST_BORROW_LOAD_FAST_BORROW, (-- value1, value2)) {
+        uint32_t oparg_hi = oparg >> 4;
+        uint32_t oparg_lo = oparg & 15;
+        value1 = GETLOCAL(oparg_hi);
+        value2 = GETLOCAL(oparg_lo);
     }
 
     op(_LOAD_FAST_AND_CLEAR, (-- value)) {
@@ -153,6 +169,9 @@ dummy_func(void) {
             REPLACE_OP(this_instr, _NOP, 0, 0);
         }
         sym_set_type(nos, &PyFloat_Type);
+    }
+
+    op(_PYVAULT_CHECK_ACCESS, (owner -- owner)) {
     }
 
     op(_BINARY_OP, (left, right -- res)) {

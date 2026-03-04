@@ -88,6 +88,7 @@ typedef struct {
     int co_ncellvars;             /* total number of cell variables */         \
     int co_nfreevars;             /* number of free variables */               \
     uint32_t co_version;          /* version number */                         \
+    uint16_t co_vault_color;      /* PyVault: security color of this code object */ \
                                                                                \
     PyObject *co_localsplusnames; /* tuple mapping offsets to names */         \
     PyObject *co_localspluskinds; /* Bytes mapping to local kinds (one byte    \
@@ -101,7 +102,7 @@ typedef struct {
     _PyCoCached *_co_cached;      /* cached co_* attributes */                 \
     uintptr_t _co_instrumentation_version; /* current instrumentation version */ \
     struct _PyCoMonitoringData *_co_monitoring; /* Monitoring data */          \
-    Py_ssize_t _co_unique_id;     /* ID used for per-thread refcounting */   \
+    Py_ssize_t _co_unique_id;     /* ID used for per-thread refcounting */     \
     int _co_firsttraceable;       /* index of first traceable instruction */   \
     /* Scratch space for extra data relating to the code object.               \
        Type is a void* to keep the format private in codeobject.c to force     \
@@ -110,6 +111,9 @@ typedef struct {
     _PyCode_DEF_THREAD_LOCAL_BYTECODE()                                        \
     char co_code_adaptive[(SIZE)];                                             \
 }
+
+#define PYVAULT_CODE_COLOR_FLAG 0x8000
+#define PYVAULT_CODE_COLOR_MASK 0x00FF
 
 /* Bytecode object */
 struct PyCodeObject _PyCode_DEF(1);

@@ -321,6 +321,10 @@ struct _import_state {
     int dlopenflags;
 #endif
     PyObject *import_func;
+    PyObject *path_importer_cache;
+    PyObject *path_importer_cache_key;
+    PyObject *path_importer_cache_value;
+    uint32_t path_importer_cache_version;
     /* The global import lock. */
     _PyRecursiveMutex lock;
     /* diagnostic info in PyImport_ImportModuleLevelObject() */

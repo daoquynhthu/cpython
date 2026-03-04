@@ -135,6 +135,7 @@ struct _object {
         };
 #else
         Py_ssize_t ob_refcnt;
+        uint16_t ob_flags;
 #endif
     };
 #ifdef _MSC_VER
@@ -161,6 +162,31 @@ struct _object {
     Py_ssize_t ob_ref_shared;   // shared (atomic) reference count
     PyTypeObject *ob_type;
 };
+#endif
+
+/* PyVault Object Tagging Macros (using ob_flags) */
+#if !defined(Py_GIL_DISABLED) && SIZEOF_VOID_P > 4
+#define PYVAULT_TAG_SHIFT 0
+#define PYVAULT_TAG_MASK  0xFFFF
+#define PYVAULT_FLAG_MASK 0xFFFF
+#define PYVAULT_COLORS    256
+
+#define PyVault_SET_OBJ_TAG(op, tag) \
+    ((op)->ob_overflow = (uint16_t)(tag))
+
+#define PyVault_GET_OBJ_TAG(op) \
+    ((uint8_t)((op)->ob_overflow))
+#else
+#define PYVAULT_TAG_SHIFT 8
+#define PYVAULT_TAG_MASK  0xFF00
+#define PYVAULT_FLAG_MASK 0x00FF
+#define PYVAULT_COLORS    256
+
+#define PyVault_SET_OBJ_TAG(op, tag) \
+    ((op)->ob_flags = ((op)->ob_flags & PYVAULT_FLAG_MASK) | ((uint16_t)(tag) << PYVAULT_TAG_SHIFT))
+
+#define PyVault_GET_OBJ_TAG(op) \
+    ((uint8_t)((op)->ob_flags >> PYVAULT_TAG_SHIFT))
 #endif
 
 /* Cast argument to PyObject* type. */

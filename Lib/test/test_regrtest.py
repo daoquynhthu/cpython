@@ -666,6 +666,10 @@ class BaseTestCase(unittest.TestCase):
             stats = TestStats(stats)
         if parallel:
             randomize = True
+        if (not randomize
+                and re.search(r'Run [0-9]+ tests in parallel using [0-9]+ worker processes',
+                              output)):
+            randomize = True
 
         rerun_failed = []
         if rerun is not None and not env_changed:
@@ -2218,7 +2222,9 @@ class ArgsTestCase(BaseTestCase):
         testdir = os.path.join(os.path.dirname(__file__),
                                'regrtestdata', 'import_from_tests')
         tests = [f'test_regrtest_{name}' for name in ('a', 'b', 'c')]
-        args = ['-Wd', '-E', '-bb', '-m', 'test', '--testdir=%s' % testdir, *tests]
+        args = ['-Wd', '-E', '-bb', '-m', 'test',
+                '--single-process',
+                '--testdir=%s' % testdir, *tests]
         output = self.run_python(args)
         self.check_executed_tests(output, tests, stats=3)
 

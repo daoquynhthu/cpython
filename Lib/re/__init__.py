@@ -126,6 +126,7 @@ import enum
 from . import _compiler, _parser
 import functools
 import _sre
+import sys
 
 
 # public symbols
@@ -327,14 +328,25 @@ _MAXCACHE = 512
 _MAXCACHE2 = 256
 assert _MAXCACHE2 < _MAXCACHE
 
+def _set_cache_tag(p):
+    set_obj_tag = getattr(sys, "set_obj_tag", None)
+    if set_obj_tag is not None:
+        try:
+            set_obj_tag(p, 0)
+        except Exception:
+            pass
+
 def _compile(pattern, flags):
     # internal: compile pattern
     if isinstance(flags, RegexFlag):
         flags = flags.value
     try:
-        return _cache2[type(pattern), pattern, flags]
+        p = _cache2[type(pattern), pattern, flags]
     except KeyError:
         pass
+    else:
+        _set_cache_tag(p)
+        return p
 
     key = (type(pattern), pattern, flags)
     # Item in _cache should be moved to the end if found.
@@ -360,6 +372,7 @@ def _compile(pattern, flags):
             except (StopIteration, RuntimeError, KeyError):
                 pass
     # Append to the end.
+    _set_cache_tag(p)
     _cache[key] = p
 
     if len(_cache2) >= _MAXCACHE2:

@@ -1172,6 +1172,12 @@ PyObject_GetAttrString(PyObject *v, const char *name)
 {
     PyObject *w, *res;
 
+    PyThreadState *tstate = _PyThreadState_GET();
+    unsigned short current_color = tstate ? tstate->vault_color : 0;
+    if (!PyVault_CheckAccessColor(v, current_color)) {
+        return NULL;
+    }
+
     if (Py_TYPE(v)->tp_getattr != NULL)
         return (*Py_TYPE(v)->tp_getattr)(v, (char*)name);
     w = PyUnicode_FromString(name);
@@ -1211,6 +1217,12 @@ PyObject_SetAttrString(PyObject *v, const char *name, PyObject *w)
 {
     PyObject *s;
     int res;
+
+    PyThreadState *tstate = _PyThreadState_GET();
+    unsigned short current_color = tstate ? tstate->vault_color : 0;
+    if (!PyVault_CheckAccessColor(v, current_color)) {
+        return -1;
+    }
 
     if (Py_TYPE(v)->tp_setattr != NULL)
         return (*Py_TYPE(v)->tp_setattr)(v, (char*)name, w);
@@ -1294,6 +1306,12 @@ PyObject_GetAttr(PyObject *v, PyObject *name)
         return NULL;
     }
 
+    PyThreadState *tstate = _PyThreadState_GET();
+    unsigned short current_color = tstate ? tstate->vault_color : 0;
+    if (!PyVault_CheckAccessColor(v, current_color)) {
+        return NULL;
+    }
+
     PyObject* result = NULL;
     if (tp->tp_getattro != NULL) {
         result = (*tp->tp_getattro)(v, name);
@@ -1326,6 +1344,13 @@ PyObject_GetOptionalAttr(PyObject *v, PyObject *name, PyObject **result)
         PyErr_Format(PyExc_TypeError,
                      "attribute name must be string, not '%.200s'",
                      Py_TYPE(name)->tp_name);
+        *result = NULL;
+        return -1;
+    }
+
+    PyThreadState *tstate = _PyThreadState_GET();
+    unsigned short current_color = tstate ? tstate->vault_color : 0;
+    if (!PyVault_CheckAccessColor(v, current_color)) {
         *result = NULL;
         return -1;
     }
@@ -1388,6 +1413,13 @@ PyObject_GetOptionalAttr(PyObject *v, PyObject *name, PyObject **result)
 int
 PyObject_GetOptionalAttrString(PyObject *obj, const char *name, PyObject **result)
 {
+    PyThreadState *tstate = _PyThreadState_GET();
+    unsigned short current_color = tstate ? tstate->vault_color : 0;
+    if (!PyVault_CheckAccessColor(obj, current_color)) {
+        *result = NULL;
+        return -1;
+    }
+
     if (Py_TYPE(obj)->tp_getattr == NULL) {
         PyObject *oname = PyUnicode_FromString(name);
         if (oname == NULL) {
@@ -1445,6 +1477,13 @@ PyObject_SetAttr(PyObject *v, PyObject *name, PyObject *value)
                      Py_TYPE(name)->tp_name);
         return -1;
     }
+
+    PyThreadState *tstate = _PyThreadState_GET();
+    unsigned short current_color = tstate ? tstate->vault_color : 0;
+    if (!PyVault_CheckAccessColor(v, current_color)) {
+        return -1;
+    }
+
     Py_INCREF(name);
 
     PyInterpreterState *interp = _PyInterpreterState_GET();
@@ -2490,6 +2529,8 @@ _PyTypes_FiniTypes(PyInterpreterState *interp)
 }
 
 
+int _PyVault_Enabled = 1;
+
 static inline void
 new_reference(PyObject *op)
 {
@@ -2517,10 +2558,90 @@ new_reference(PyObject *op)
     op->ob_ref_shared = 0;
 #endif
 #endif
+
+    /* PyVault: Apply current thread color to the object flags */
+    PyThreadState *tstate = _PyThreadState_GET();
+    if (tstate && _PyVault_Enabled) {
+        PyVault_SET_OBJ_TAG(op, (uint8_t)tstate->vault_color);
+    }
+
 #ifdef Py_TRACE_REFS
     _Py_AddToAllObjects(op);
 #endif
     _PyReftracerTrack(op, PyRefTracer_CREATE);
+}
+
+void
+PyVault_Enable(void)
+{
+    _PyVault_Enabled = 1;
+}
+
+int
+PyVault_CheckAccessColor(PyObject *op, unsigned short current_color)
+{
+    if (!_PyVault_Enabled) {
+        return 1;
+    }
+    uint8_t obj_tag = PyVault_GET_OBJ_TAG(op);
+    uint8_t current = (uint8_t)current_color;
+    if (current == 0) {
+        if (obj_tag == 0) {
+            return 1;
+        }
+        if (PyTraceBack_Check(op) || PyFrame_Check(op)) {
+            return 1;
+        }
+        if (strcmp(Py_TYPE(op)->tp_name, "_GeneratorContextManager") == 0) {
+            return 1;
+        }
+        if (obj_tag != 0) {
+            PyThreadState *tstate = _PyThreadState_GET();
+            uint16_t saved_color = 0;
+            if (tstate != NULL) {
+                saved_color = tstate->vault_color;
+                tstate->vault_color = 0;
+            }
+            PyErr_Format(PyExc_PermissionError,
+                         "PyVault: Security violation! Accessing %s object with tag %u from context with color %u",
+                         Py_TYPE(op)->tp_name, (unsigned int)obj_tag, (unsigned int)current);
+            if (tstate != NULL) {
+                tstate->vault_color = saved_color;
+            }
+            PyObject *exc, *val, *tb;
+            PyErr_Fetch(&exc, &val, &tb);
+            if (val != NULL) {
+                PyVault_SET_OBJ_TAG(val, 0);
+            }
+            Py_XDECREF(tb);
+            PyErr_Restore(exc, val, NULL);
+            return 0;
+        }
+        return 1;
+    }
+    if (obj_tag != 0 && obj_tag != current) {
+        PyThreadState *tstate = _PyThreadState_GET();
+        uint16_t saved_color = 0;
+        if (tstate != NULL) {
+            saved_color = tstate->vault_color;
+            tstate->vault_color = 0;
+        }
+        PyErr_Format(PyExc_PermissionError,
+                     "PyVault: Security violation! Accessing %s object with tag %u from context with color %u",
+                     Py_TYPE(op)->tp_name, (unsigned int)obj_tag, (unsigned int)current);
+        if (tstate != NULL) {
+            tstate->vault_color = saved_color;
+        }
+        PyObject *exc, *val, *tb;
+        PyErr_Fetch(&exc, &val, &tb);
+        if (val != NULL) {
+            PyVault_SET_OBJ_TAG(val, 0);
+        }
+        Py_XDECREF(tb);
+        PyErr_Restore(exc, val, NULL);
+        return 0;
+    }
+    return 1;
 }
 
 void
@@ -2558,7 +2679,7 @@ _Py_SetImmortalUntracked(PyObject *op)
     op->ob_ref_shared = 0;
     _Py_atomic_or_uint8(&op->ob_gc_bits, _PyGC_BITS_DEFERRED);
 #elif SIZEOF_VOID_P > 4
-    op->ob_flags = _Py_IMMORTAL_FLAGS;
+    op->ob_flags |= _Py_IMMORTAL_FLAGS;
     op->ob_refcnt = _Py_IMMORTAL_INITIAL_REFCNT;
 #else
     op->ob_refcnt = _Py_IMMORTAL_INITIAL_REFCNT;

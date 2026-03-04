@@ -42,6 +42,7 @@ struct _PyInterpreterFrame {
     int32_t tlbc_index;
 #endif
     uint16_t return_offset;  /* Only relevant during a function call */
+    uint16_t vault_prev_color; /* PyVault: saved color of the previous context */
     char owner;
 #ifdef Py_DEBUG
     uint8_t visited:1;

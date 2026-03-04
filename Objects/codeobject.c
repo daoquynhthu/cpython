@@ -554,6 +554,7 @@ init_code(PyCodeObject *co, struct _PyCodeConstructor *con)
     PyMutex_Lock(&interp->func_state.mutex);
 #endif
     co->co_version = interp->func_state.next_version;
+    co->co_vault_color = 0;  /* PyVault: default color */
     if (interp->func_state.next_version != 0) {
         interp->func_state.next_version++;
     }

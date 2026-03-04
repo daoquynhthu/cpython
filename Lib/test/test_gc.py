@@ -842,6 +842,38 @@ class GCTests(unittest.TestCase):
         self.assertEqual(new[1]["collections"], old[1]["collections"])
         self.assertEqual(new[2]["collections"], old[2]["collections"] + 1)
 
+    def test_get_threshold_stats(self):
+        stats = gc.get_threshold_stats()
+        self.assertIsInstance(stats, dict)
+        self.assertEqual(set(stats), {
+            "thresholds",
+            "counts",
+            "enabled",
+            "collecting",
+            "scheduled",
+            "heap_size",
+            "work_to_do",
+            "visited_space",
+            "phase",
+        })
+        thresholds = stats["thresholds"]
+        counts = stats["counts"]
+        self.assertIsInstance(thresholds, tuple)
+        self.assertEqual(len(thresholds), 3)
+        self.assertIsInstance(counts, tuple)
+        self.assertEqual(len(counts), 3)
+        for value in thresholds:
+            self.assertIsInstance(value, int)
+        for value in counts:
+            self.assertIsInstance(value, int)
+        self.assertIsInstance(stats["enabled"], bool)
+        self.assertIsInstance(stats["collecting"], bool)
+        self.assertIsInstance(stats["scheduled"], bool)
+        self.assertIsInstance(stats["heap_size"], int)
+        self.assertIsInstance(stats["work_to_do"], int)
+        self.assertIsInstance(stats["visited_space"], int)
+        self.assertIsInstance(stats["phase"], int)
+
     def test_freeze(self):
         gc.freeze()
         self.assertGreater(gc.get_freeze_count(), 0)
