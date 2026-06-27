@@ -668,4 +668,11 @@ extern "C" {
 #endif
 
 
+// Py_TRACING_GC and Py_GIL_DISABLED are mutually exclusive
+// See ARCHITECTURE.md §2.2 and §14.2
+#if defined(Py_GIL_DISABLED) && defined(Py_TRACING_GC)
+#  error "Py_GIL_DISABLED and Py_TRACING_GC are mutually exclusive. " \
+         "Use --disable-gil (free-threaded) or --enable-tracing-gc (tracing GC), not both."
+#endif
+
 #endif /* Py_PYPORT_H */

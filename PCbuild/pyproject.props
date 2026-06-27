@@ -55,13 +55,14 @@
     <_PlatformPreprocessorDefinition Condition="$(Platform) == 'x64'">_WIN64;</_PlatformPreprocessorDefinition>
     <_PlatformPreprocessorDefinition Condition="$(Platform) == 'x64' and $(PlatformToolset) != 'ClangCL'">_M_X64;$(_PlatformPreprocessorDefinition)</_PlatformPreprocessorDefinition>
     <_FreeThreadedPreprocessorDefinition Condition="$(DisableGil) == 'true'">Py_GIL_DISABLED=1;</_FreeThreadedPreprocessorDefinition>
+    <_TracingGCPreprocessorDefinition Condition="$(UseTracingGC) == 'true'">Py_TRACING_GC=1;</_TracingGCPreprocessorDefinition>
     <_PymallocHugepagesPreprocessorDefinition Condition="$(UsePymallocHugepages) == 'true'">PYMALLOC_USE_HUGEPAGES=1;</_PymallocHugepagesPreprocessorDefinition>
     <_PyUsingPgoPreprocessorDefinition Condition="'$(SupportPGO)' and ($(Configuration) == 'PGInstrument' or $(Configuration) == 'PGUpdate')">_Py_USING_PGO=1;</_PyUsingPgoPreprocessorDefinition>
   </PropertyGroup>
   <ItemDefinitionGroup>
     <ClCompile>
       <AdditionalIncludeDirectories>$(PySourcePath)Include;$(PySourcePath)Include\internal;$(PySourcePath)Include\internal\mimalloc;$(PySourcePath)PC;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
-      <PreprocessorDefinitions>WIN32;$(_PlatformPreprocessorDefinition)$(_DebugPreprocessorDefinition)$(_PyStatsPreprocessorDefinition)$(_PydPreprocessorDefinition)$(_FreeThreadedPreprocessorDefinition)$(_PymallocHugepagesPreprocessorDefinition)$(_PyUsingPgoPreprocessorDefinition)%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>WIN32;$(_PlatformPreprocessorDefinition)$(_DebugPreprocessorDefinition)$(_PyStatsPreprocessorDefinition)$(_PydPreprocessorDefinition)$(_FreeThreadedPreprocessorDefinition)$(_TracingGCPreprocessorDefinition)$(_PymallocHugepagesPreprocessorDefinition)$(_PyUsingPgoPreprocessorDefinition)%(PreprocessorDefinitions)</PreprocessorDefinitions>
 
       <Optimization>MaxSpeed</Optimization>
       <IntrinsicFunctions>true</IntrinsicFunctions>

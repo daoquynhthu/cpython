@@ -98,11 +98,12 @@ CONFIGURE_LDFLAGS_NODIST=@LDFLAGS_NODIST@
 CONFIGURE_LDFLAGS_NOLTO=@LDFLAGS_NOLTO@
 CONFIGURE_CPPFLAGS=	@CPPFLAGS@
 CONFIGURE_LDFLAGS=	@LDFLAGS@
+TRACING_GC_CFLAGS=	@TRACING_GC_CFLAGS@
 # Avoid assigning CFLAGS, LDFLAGS, etc. so users can use them on the
 # command line to append to these values without stomping the pre-set
 # values.
 PY_CFLAGS=	$(BASECFLAGS) $(OPT) $(CONFIGURE_CFLAGS) $(CFLAGS) $(EXTRA_CFLAGS)
-PY_CFLAGS_NODIST=$(CONFIGURE_CFLAGS_NODIST) $(CFLAGS_NODIST) -I$(srcdir)/Include/internal -I$(srcdir)/Include/internal/mimalloc
+PY_CFLAGS_NODIST=$(CONFIGURE_CFLAGS_NODIST) $(CFLAGS_NODIST) $(TRACING_GC_CFLAGS) -I$(srcdir)/Include/internal -I$(srcdir)/Include/internal/mimalloc
 # Both CPPFLAGS and LDFLAGS need to contain the shell's value for setup.py to
 # be able to build extension modules using the directories specified in the
 # environment variables
