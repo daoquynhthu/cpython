@@ -11,7 +11,7 @@
 |------|------|---------|------|
 | 0.0 测试桩+构建基线+回归框架 | ✅ 已完成 | 2026-06-27 | 7 桩函数，双模式编译通过 |
 | 0.1 编译开关定义 | ✅ 已完成 | 2026-06-27 | PCbuild + pyport.h + Makefile |
-| 0.2 PyObject 结构体改造 | ⬜ 待开始 | — | — |
+| 0.2 PyObject 结构体改造 | ✅ 已完成 | 2026-06-27 | object.h struct _object 重定义 |
 | 0.3 GC 运行时状态 | ⬜ 待开始 | — | — |
 | 0.4 对象堆初始化 | ⬜ 待开始 | — | — |
 | 0.5 基础对象分配器 | ⬜ 待开始 | — | — |
@@ -68,11 +68,7 @@
 ---
 
 > **正在进行的任务**：（无）
-> **最近完成的任务**：[Task-0.1] 编译开关定义  @2026-06-27
->   在 `PCbuild/pyproject.props` 添加 `_TracingGCPreprocessorDefinition`（Windows 全局宏定义），
->   在 `Include/pyport.h` 添加互斥守卫（拒绝 Py_GIL_DISABLED + Py_TRACING_GC 共存），
->   在 `Makefile.pre.in` 添加 `TRACING_GC_CFLAGS` 变量（Unix 构建入口）。
->   审查 0 FAIL，门禁三项全绿。
-> 
-> *前序*: [Task-0.0] 测试桩+构建基线+回归框架  @2026-06-27
->   创建 `Python/gc_stubs.c`（7 桩，匹配 ARCHITECTURE.md 签名），`Lib/test/test_tracegc.py`（3 测试），修改 `PCbuild/pythoncore.vcxproj` + `Makefile.pre.in` 加入新文件。审查发现 4 项问题（签名不匹配 x3、排序错误 x1）已全部修复。
+> **最近完成的任务**：
+> - [x] [Task-0.2] PyObject 结构体改造  @2026-06-27  struct _object 重定义（3 分支），PyObject_HEAD_INIT 适配，端序守卫，static_assert sizeof+offsetof
+> - [x] [Task-0.1] 编译开关定义  @2026-06-27  PCbuild/pyproject.props + pyport.h 互斥守卫 + Makefile.pre.in
+> - [x] [Task-0.0] 测试桩+构建基线+回归框架  @2026-06-27  gc_stubs.c(7 桩) + test_tracegc.py + build diff

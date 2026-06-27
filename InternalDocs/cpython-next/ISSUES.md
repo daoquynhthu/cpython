@@ -66,6 +66,28 @@
 | **描述** | PROGRESS.md Phase 0 表格从 0.1 开始，缺少 0.0 行。Agent 无法在 PROGRESS.md 中标记 0.0 的完成状态。 |
 | **修复** | 在表格中补充 0.0 行，标记为已完成。 |
 
+### I-006: Phase 0.2 端序守卫缺失
+
+| 属性 | 值 |
+|------|----|
+| **发现阶段** | STEP 4 审查 (Task-0.2) |
+| **严重度** | 低 |
+| **状态** | ✅ RESOLVED (2026-06-27) |
+| **架构参考** | ARCHITECTURE.md §3.1 第 213-225 行 |
+| **描述** | `Include/object.h` 中 `Py_TRACING_GC` 分支的 `struct _object` 内联 `struct` 缺少 `#if PY_LITTLE_ENDIAN` / `#else` 守卫。在大端平台上，`ob_gc_state` / `ob_gc_age` / `ob_flags` 的位偏移会错误。 |
+| **修复** | 添加 `#if PY_LITTLE_LE` ... `#else` ... `#endif` 守卫，大端布局按 ARCHITECTURE.md 定义的逆序排列。 |
+
+### I-007: Phase 0.2 `offsetof(ob_type) == 8` 断言缺失
+
+| 属性 | 值 |
+|------|----|
+| **发现阶段** | STEP 4 审查 (Task-0.2) |
+| **严重度** | 低 |
+| **状态** | ✅ RESOLVED (2026-06-27) |
+| **架构参考** | ARCHITECTURE.md §3.1 第 233 行 |
+| **描述** | 仅有 `sizeof==16` 断言，缺少 `offsetof(ob_type)==8` 断言。该偏移是 ABI 兼容的关键约束。 |
+| **修复** | 添加 `static_assert(offsetof(struct _object, ob_type) == 8)`。 |
+
 ---
 
 > 最后更新：2026-06-27

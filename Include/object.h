@@ -85,6 +85,12 @@ whose size is determined when the object is allocated.
         0,                          \
         (type),                     \
     },
+#elif defined(Py_TRACING_GC)
+#define PyObject_HEAD_INIT(type)    \
+    {                               \
+        { 0 },                          \
+        (type)                      \
+    },
 #else
 #define PyObject_HEAD_INIT(type)    \
     {                               \
@@ -123,7 +129,47 @@ whose size is determined when the object is allocated.
  */
 #ifdef _Py_OPAQUE_PYOBJECT
   /* PyObject is opaque */
-#elif !defined(Py_GIL_DISABLED)
+#elif defined(Py_GIL_DISABLED)
+// Objects that are not owned by any thread use a thread id (tid) of zero.
+// This includes both immortal objects and objects whose reference count
+// fields have been merged.
+#define _Py_UNOWNED_TID             0
+
+struct _object {
+    // ob_tid stores the thread id (or zero). It is also used by the GC and the
+    // trashcan mechanism as a linked list pointer and by the GC to store the
+    // computed "gc_refs" refcount.
+    _Py_ALIGNED_DEF(_PyObject_MIN_ALIGNMENT, uintptr_t) ob_tid;
+    uint16_t ob_flags;
+    PyMutex ob_mutex;           // per-object lock
+    uint8_t ob_gc_bits;         // gc-related state
+    uint32_t ob_ref_local;      // local reference count
+    Py_ssize_t ob_ref_shared;   // shared (atomic) reference count
+    PyTypeObject *ob_type;
+};
+#elif defined(Py_TRACING_GC)
+struct _object {
+    _Py_ANONYMOUS union {
+        int64_t _ob_word;           /* 8 字节，与 ob_refcnt_full 同位置同大小 */
+        struct {
+#  if PY_LITTLE_ENDIAN
+            uint32_t ob_gc_state;   /* 偏移 0, 大小 4 — GC 状态 (见 §3.2) */
+            uint16_t ob_gc_age;     /* 偏移 4, 大小 2 — GC 年龄计数器   */
+            uint16_t ob_flags;      /* 偏移 6, 大小 2 — 对象标志位      */
+#  else
+            uint16_t ob_flags;      /* 偏移 0, 大小 2 */
+            uint16_t ob_gc_age;     /* 偏移 2, 大小 2 */
+            uint32_t ob_gc_state;   /* 偏移 4, 大小 4 */
+#  endif
+        };
+        _Py_ALIGNED_DEF(_PyObject_MIN_ALIGNMENT, char) _aligner;
+    };                                   /* 共计 8 字节 */
+    PyTypeObject *ob_type;               /* 偏移 8, 大小 8 */
+};
+static_assert(sizeof(struct _object) == 16, "PyObject size must be 16 bytes");
+static_assert(offsetof(struct _object, ob_type) == 8,
+              "PyObject.ob_type offset must be 8 for ABI compatibility");
+#else
 struct _object {
     _Py_ANONYMOUS union {
 #if SIZEOF_VOID_P > 4
@@ -146,24 +192,6 @@ struct _object {
     };
 
     PyTypeObject *ob_type;  // part of stable ABI; do not change
-};
-#else
-// Objects that are not owned by any thread use a thread id (tid) of zero.
-// This includes both immortal objects and objects whose reference count
-// fields have been merged.
-#define _Py_UNOWNED_TID             0
-
-struct _object {
-    // ob_tid stores the thread id (or zero). It is also used by the GC and the
-    // trashcan mechanism as a linked list pointer and by the GC to store the
-    // computed "gc_refs" refcount.
-    _Py_ALIGNED_DEF(_PyObject_MIN_ALIGNMENT, uintptr_t) ob_tid;
-    uint16_t ob_flags;
-    PyMutex ob_mutex;           // per-object lock
-    uint8_t ob_gc_bits;         // gc-related state
-    uint32_t ob_ref_local;      // local reference count
-    Py_ssize_t ob_ref_shared;   // shared (atomic) reference count
-    PyTypeObject *ob_type;
 };
 #endif // !defined(_Py_OPAQUE_PYOBJECT)
 
