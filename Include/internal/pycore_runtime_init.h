@@ -128,10 +128,16 @@ extern PyTypeObject _PyExc_MemoryError;
                 .maxloop = MAXPENDINGCALLSLOOP, \
             }, \
         }, \
+#if !defined(Py_TRACING_GC)
         .gc = { \
             .enabled = 1, \
             GC_GENERATION_INIT \
         }, \
+#else
+        .gc = { \
+            .enabled = 1, \
+        }, \
+#endif
         .qsbr = { \
             .wr_seq = QSBR_INITIAL, \
             .rd_seq = QSBR_INITIAL, \

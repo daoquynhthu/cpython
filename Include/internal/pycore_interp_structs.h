@@ -221,6 +221,8 @@ struct gc_stats {
     struct gc_old_stats_buffer old[2];
 };
 
+#if !defined(Py_TRACING_GC)
+
 struct _gc_runtime_state {
     /* Is automatic collection enabled? */
     int enabled;
@@ -284,6 +286,74 @@ struct _gc_runtime_state {
         { .threshold = 10, }, \
     },
 #endif
+
+#elif defined(Py_TRACING_GC)
+
+struct _gc_runtime_state {
+    /* ── 开关控制 ── */
+    int enabled;
+    int debug;
+
+    /* ── 分代堆状态 ── */
+    struct gc_heap_state {
+        char *eden_start;
+        char *eden_end;
+        char *eden_top;
+        size_t eden_size;
+
+        char *survivor_start;
+        char *survivor_end;
+        size_t survivor_size;
+
+        char *old_start;
+        char *old_end;
+        size_t old_size;
+    } heap;
+
+    /* ── 标记栈 ── */
+    struct gc_mark_stack {
+        PyObject **stack;
+        size_t capacity;
+        size_t top;
+    } mark_stack;
+
+    /* ── Card Table ── */
+    struct gc_card_table {
+        uint8_t *cards;
+        size_t num_cards;
+        size_t card_size;
+    } card_table;
+
+    /* ── GC 触发控制 ── */
+    Py_ssize_t young_threshold;
+    Py_ssize_t old_threshold;
+
+    /* ── GC 正在进行中 ── */
+    int collecting;
+    _PyInterpreterFrame *collecting_frame;
+
+    /* ── GC 统计 ── */
+    struct {
+        PyTime_t last_collection_time;
+        double total_pause_time;
+        Py_ssize_t minor_collections;
+        Py_ssize_t major_collections;
+        Py_ssize_t objects_promoted;
+        Py_ssize_t total_freed;
+    } stats;
+
+    /* ── 增量标记状态 ── */
+    int marking_in_progress;
+    double marking_deadline;
+};
+
+/* ── 默认参数 ── */
+#define _PyGC_DEFAULT_EDEN_SIZE       (16 * 1024 * 1024)   /* 16 MB */
+#define _PyGC_DEFAULT_SURVIVOR_SIZE   (4 * 1024 * 1024)    /* 4 MB */
+#define _PyGC_DEFAULT_OLD_SIZE        (256 * 1024 * 1024)  /* 256 MB */
+#define _PyGC_CARD_SIZE               512
+
+#endif /* !defined(Py_TRACING_GC) */
 
 #include "pycore_gil.h"           // struct _gil_runtime_state
 

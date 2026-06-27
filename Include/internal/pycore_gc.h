@@ -12,6 +12,36 @@ extern "C" {
 #include "pycore_pystate.h"       // _PyInterpreterState_GET()
 #include "pycore_typedefs.h"      // _PyInterpreterFrame
 
+#if defined(Py_TRACING_GC)
+
+/* GC 颜色常量（三色标记，占用 2 位） */
+#define _PyGC_COLOR_WHITE   0
+#define _PyGC_COLOR_GREY    1
+#define _PyGC_COLOR_BLACK   2
+#define _PyGC_COLOR_FREE    3
+
+#define _PyGC_COLOR_MASK    ((uint32_t)0x00000003)
+
+static inline uint32_t _PyGC_GetColor(PyObject *op) {
+    return op->ob_gc_state & _PyGC_COLOR_MASK;
+}
+static inline void _PyGC_SetColor(PyObject *op, uint32_t color) {
+    uint32_t state = op->ob_gc_state;
+    state = (state & ~_PyGC_COLOR_MASK) | (color & _PyGC_COLOR_MASK);
+    op->ob_gc_state = state;
+}
+static inline int _PyGC_IsWhite(PyObject *op) {
+    return _PyGC_GetColor(op) == _PyGC_COLOR_WHITE;
+}
+static inline int _PyGC_IsGrey(PyObject *op) {
+    return _PyGC_GetColor(op) == _PyGC_COLOR_GREY;
+}
+static inline int _PyGC_IsBlack(PyObject *op) {
+    return _PyGC_GetColor(op) == _PyGC_COLOR_BLACK;
+}
+
+#endif
+
 
 /* Get an object's GC head */
 static inline PyGC_Head* _Py_AS_GC(PyObject *op) {
@@ -71,8 +101,10 @@ _PyObject_CLEAR_GC_BITS(PyObject *op, uint8_t bits_to_clear)
 
 /* True if the object is currently tracked by the GC. */
 static inline int _PyObject_GC_IS_TRACKED(PyObject *op) {
-#ifdef Py_GIL_DISABLED
+#if defined(Py_GIL_DISABLED)
     return _PyObject_HAS_GC_BITS(op, _PyGC_BITS_TRACKED);
+#elif defined(Py_TRACING_GC)
+    return _PyType_IS_GC(Py_TYPE(op)) ? 1 : 0;
 #else
     PyGC_Head *gc = _Py_AS_GC(op);
     return (gc->_gc_next != 0);
@@ -211,12 +243,19 @@ static inline void _PyObject_GC_TRACK(
 #endif
     PyObject *op)
 {
+#if defined(Py_TRACING_GC)
+    (void)op;
+#ifndef NDEBUG
+    (void)filename; (void)lineno;
+#endif
+#elif defined(Py_GIL_DISABLED)
+    (void)filename; (void)lineno;
+    _PyObject_SET_GC_BITS(op, _PyGC_BITS_TRACKED);
+#else
     _PyObject_ASSERT_FROM(op, !_PyObject_GC_IS_TRACKED(op),
                           "object already tracked by the garbage collector",
                           filename, lineno, __func__);
-#ifdef Py_GIL_DISABLED
-    _PyObject_SET_GC_BITS(op, _PyGC_BITS_TRACKED);
-#else
+
     PyGC_Head *gc = _Py_AS_GC(op);
     _PyObject_ASSERT_FROM(op,
                           (gc->_gc_prev & _PyGC_PREV_MASK_COLLECTING) == 0,
@@ -251,13 +290,19 @@ static inline void _PyObject_GC_UNTRACK(
 #endif
     PyObject *op)
 {
+#if defined(Py_TRACING_GC)
+    (void)op;
+#ifndef NDEBUG
+    (void)filename; (void)lineno;
+#endif
+#elif defined(Py_GIL_DISABLED)
+    (void)filename; (void)lineno;
+    _PyObject_CLEAR_GC_BITS(op, _PyGC_BITS_TRACKED);
+#else
     _PyObject_ASSERT_FROM(op, _PyObject_GC_IS_TRACKED(op),
                           "object not tracked by the garbage collector",
                           filename, lineno, __func__);
 
-#ifdef Py_GIL_DISABLED
-    _PyObject_CLEAR_GC_BITS(op, _PyGC_BITS_TRACKED);
-#else
     PyGC_Head *gc = _Py_AS_GC(op);
     PyGC_Head *prev = _PyGCHead_PREV(gc);
     PyGC_Head *next = _PyGCHead_NEXT(gc);
@@ -269,6 +314,20 @@ static inline void _PyObject_GC_UNTRACK(
     gcstate->heap_size--;
 #endif
 }
+
+#if defined(Py_TRACING_GC)
+#  ifdef NDEBUG
+#    define _PyObject_GC_TRACK(op) \
+        _PyObject_GC_TRACK(_PyObject_CAST(op))
+#    define _PyObject_GC_UNTRACK(op) \
+        _PyObject_GC_UNTRACK(_PyObject_CAST(op))
+#  else
+#    define _PyObject_GC_TRACK(op) \
+        _PyObject_GC_TRACK(__FILE__, __LINE__, _PyObject_CAST(op))
+#    define _PyObject_GC_UNTRACK(op) \
+        _PyObject_GC_UNTRACK(__FILE__, __LINE__, _PyObject_CAST(op))
+#  endif
+#endif
 
 
 

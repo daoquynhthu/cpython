@@ -5,7 +5,10 @@
 // Replaced with real implementations incrementally in Phase 0.1-0.8.
 
 #include "Python.h"
+#include "pycore_gc.h"
+#include "pycore_initconfig.h"
 #include "pycore_interp_structs.h"
+#include "pycore_pylifecycle.h"
 #include "pycore_pystate.h"
 
 #if defined(Py_TRACING_GC)
@@ -75,6 +78,119 @@ _PyGC_CollectOld(PyThreadState *tstate)
 {
     (void)tstate;
     return 0;
+}
+
+// ── Runtime state initialization ──────────────────────────────────
+
+void
+_PyGC_InitState(struct _gc_runtime_state *gcstate)
+{
+    memset(gcstate, 0, sizeof(*gcstate));
+    gcstate->enabled = 1;
+}
+
+PyStatus
+_PyGC_Init(PyInterpreterState *interp)
+{
+    (void)interp;
+    return _PyStatus_OK();
+}
+
+// ── GC on/off control ────────────────────────────────────────────
+
+int
+PyGC_Enable(void)
+{
+    struct _gc_runtime_state *gcstate = &_PyInterpreterState_GET()->gc;
+    int old_state = gcstate->enabled;
+    gcstate->enabled = 1;
+    return old_state;
+}
+
+int
+PyGC_Disable(void)
+{
+    struct _gc_runtime_state *gcstate = &_PyInterpreterState_GET()->gc;
+    int old_state = gcstate->enabled;
+    gcstate->enabled = 0;
+    return old_state;
+}
+
+int
+PyGC_IsEnabled(void)
+{
+    struct _gc_runtime_state *gcstate = &_PyInterpreterState_GET()->gc;
+    return gcstate->enabled;
+}
+
+// ── Collection entry points ──────────────────────────────────────
+
+Py_ssize_t
+_PyGC_Collect(PyThreadState *tstate, int generation, _PyGC_Reason reason)
+{
+    (void)tstate;
+    (void)generation;
+    (void)reason;
+    return 0;
+}
+
+void
+_PyGC_CollectNoFail(PyThreadState *tstate)
+{
+    (void)tstate;
+}
+
+// ── Freeze / unfreeze ────────────────────────────────────────────
+
+void
+_PyGC_Freeze(PyInterpreterState *interp)
+{
+    (void)interp;
+}
+
+void
+_PyGC_Unfreeze(PyInterpreterState *interp)
+{
+    (void)interp;
+}
+
+Py_ssize_t
+_PyGC_GetFreezeCount(PyInterpreterState *interp)
+{
+    (void)interp;
+    return 0;
+}
+
+// ── Introspection ────────────────────────────────────────────────
+
+PyObject *
+_PyGC_GetObjects(PyInterpreterState *interp, int generation)
+{
+    (void)interp;
+    (void)generation;
+    return PyList_New(0);
+}
+
+PyObject *
+_PyGC_GetReferrers(PyInterpreterState *interp, PyObject *objs)
+{
+    (void)interp;
+    (void)objs;
+    return PyList_New(0);
+}
+
+// ── Miscellaneous ────────────────────────────────────────────────
+
+void
+_PyGC_ClearAllFreeLists(PyInterpreterState *interp)
+{
+    (void)interp;
+}
+
+void
+_Py_RunGC(PyThreadState *tstate)
+{
+    (void)tstate;
 }
 
 #endif // defined(Py_TRACING_GC)

@@ -4,6 +4,60 @@
 extern "C" {
 #endif
 
+#if defined(Py_TRACING_GC)
+
+/* Tracing GC mode: ob_refcnt does not exist in PyObject.
+   All reference-counting macros are no-ops or return sentinel values. */
+
+static inline Py_ssize_t _Py_REFCNT(PyObject *ob) { (void)ob; return 1; }
+#define Py_REFCNT(ob) _Py_REFCNT(_PyObject_CAST(ob))
+
+static inline int _Py_IsImmortal(PyObject *op) {
+    return (op->ob_flags & _Py_IMMORTAL_FLAGS) != 0;
+}
+#define _Py_IsImmortal(op) _Py_IsImmortal(_PyObject_CAST(op))
+
+static inline int _Py_IsStaticImmortal(PyObject *op) {
+    return (op->ob_flags & _Py_STATICALLY_ALLOCATED_FLAG) != 0;
+}
+#define _Py_IsStaticImmortal(op) _Py_IsStaticImmortal(_PyObject_CAST(op))
+
+static inline void Py_SET_REFCNT(PyObject *ob, Py_ssize_t refcnt) {
+    (void)ob; (void)refcnt;
+}
+#define Py_SET_REFCNT(ob, refcnt) Py_SET_REFCNT(_PyObject_CAST(ob), (refcnt))
+
+static inline void Py_INCREF(PyObject *op) { (void)op; }
+#define Py_INCREF(op) Py_INCREF(_PyObject_CAST(op))
+
+static inline void Py_DECREF(PyObject *op) { (void)op; }
+#define Py_DECREF(op) Py_DECREF(_PyObject_CAST(op))
+
+static inline void Py_XINCREF(PyObject *op) { (void)op; }
+#define Py_XINCREF(op) Py_XINCREF(_PyObject_CAST(op))
+
+static inline void Py_XDECREF(PyObject *op) { (void)op; }
+#define Py_XDECREF(op) Py_XDECREF(_PyObject_CAST(op))
+
+static inline PyObject *Py_NewRef(PyObject *op) { return op; }
+#define Py_NewRef(op) Py_NewRef(_PyObject_CAST(op))
+
+static inline PyObject *Py_XNewRef(PyObject *op) { return op; }
+#define Py_XNewRef(op) Py_XNewRef(_PyObject_CAST(op))
+
+#define Py_CLEAR(op) \
+    do { \
+        if ((op) != NULL) { \
+            (op) = NULL; \
+        } \
+    } while (0)
+
+#define _Py_DECREF_SPECIALIZED(op, func) ((void)(op), (void)(func))
+
+static inline void Py_IncRef(PyObject *o) { (void)o; }
+static inline void Py_DecRef(PyObject *o) { (void)o; }
+
+#else /* !defined(Py_TRACING_GC) */
 
 #if !defined(_Py_OPAQUE_PYOBJECT)
 /*
@@ -554,6 +608,8 @@ static inline PyObject* _Py_XNewRef(PyObject *obj)
 #  define Py_XNewRef(obj) _Py_XNewRef(obj)
 #endif
 
+
+#endif /* !defined(Py_TRACING_GC) */
 
 #ifdef __cplusplus
 }

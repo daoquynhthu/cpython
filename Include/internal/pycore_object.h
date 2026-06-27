@@ -18,6 +18,68 @@ extern "C" {
 
 #include <stdbool.h>              // bool
 
+#if defined(Py_TRACING_GC)
+
+#define _PyObject_HEAD_INIT(type)         \
+    {                                     \
+        .ob_flags = _Py_IMMORTAL_FLAGS | _Py_STATICALLY_ALLOCATED_FLAG, \
+        .ob_type = (type)                 \
+    }
+#define _PyVarObject_HEAD_INIT(type, size)    \
+    {                                         \
+        .ob_base = _PyObject_HEAD_INIT(type), \
+        .ob_size = (size)                     \
+    }
+
+static inline void
+_Py_RefcntAdd(PyObject *op, Py_ssize_t n)
+{
+    (void)op; (void)n;
+}
+
+static inline int
+_PyObject_IsUniquelyReferenced(PyObject *ob)
+{
+    (void)ob;
+    return 1;
+}
+
+static inline void _Py_SetMortal(PyObject *op, short refcnt)
+{
+    (void)op; (void)refcnt;
+}
+
+static inline void _Py_ClearImmortal(PyObject *op)
+{
+    (void)op;
+}
+
+static inline void
+_Py_NewReference(PyObject *op)
+{
+    op->ob_gc_state = _PyGC_COLOR_WHITE;
+    op->ob_gc_age = 0;
+    op->ob_flags = 0;
+}
+
+static inline void
+_PyObject_Init(PyObject *op, PyTypeObject *typeobj)
+{
+    op->ob_gc_state = _PyGC_COLOR_WHITE;
+    op->ob_gc_age = 0;
+    op->ob_flags = 0;
+    op->ob_type = typeobj;
+}
+
+static inline PyObject *
+_PyObject_InitVar(PyVarObject *op, PyTypeObject *typeobj, Py_ssize_t size)
+{
+    _PyObject_Init((PyObject *)op, typeobj);
+    op->ob_size = size;
+    return (PyObject *)op;
+}
+
+#else /* !defined(Py_TRACING_GC) */
 
 // This value is added to `ob_ref_shared` for objects that use deferred
 // reference counting so that they are not immediately deallocated when the
@@ -1037,6 +1099,8 @@ static inline Py_ALWAYS_INLINE void _Py_INCREF_MORTAL(PyObject *op)
 /* Utility for the tp_traverse slot of mutable heap types that have no other
  * references. */
 PyAPI_FUNC(int) _PyObject_VisitType(PyObject *op, visitproc visit, void *arg);
+
+#endif /* !defined(Py_TRACING_GC) */
 
 #ifdef __cplusplus
 }

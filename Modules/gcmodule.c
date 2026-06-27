@@ -156,6 +156,7 @@ gc_set_threshold_impl(PyObject *module, int threshold0, int group_right_1,
                       int threshold1, int group_right_2, int threshold2)
 /*[clinic end generated code: output=2e3c7c7dd59060f3 input=0d9612db50984eec]*/
 {
+#if !defined(Py_TRACING_GC)
     GCState *gcstate = get_gc_state();
 
 #ifndef Py_GIL_DISABLED
@@ -178,6 +179,10 @@ gc_set_threshold_impl(PyObject *module, int threshold0, int group_right_1,
     }
     _PyEval_StartTheWorld(interp);
 #endif
+#else
+    (void)threshold0; (void)group_right_1;
+    (void)threshold1; (void)group_right_2; (void)threshold2;
+#endif
     Py_RETURN_NONE;
 }
 
@@ -191,6 +196,7 @@ static PyObject *
 gc_get_threshold_impl(PyObject *module)
 /*[clinic end generated code: output=7902bc9f41ecbbd8 input=286d79918034d6e6]*/
 {
+#if !defined(Py_TRACING_GC)
     GCState *gcstate = get_gc_state();
 #ifndef Py_GIL_DISABLED
     return Py_BuildValue("(iii)",
@@ -202,6 +208,9 @@ gc_get_threshold_impl(PyObject *module)
                          gcstate->young.threshold,
                          gcstate->old[0].threshold,
                          gcstate->old[1].threshold);
+#endif
+#else
+    return Py_BuildValue("(iii)", 0, 0, 0);
 #endif
 }
 
@@ -215,6 +224,7 @@ static PyObject *
 gc_get_count_impl(PyObject *module)
 /*[clinic end generated code: output=354012e67b16398f input=a392794a08251751]*/
 {
+#if !defined(Py_TRACING_GC)
     GCState *gcstate = get_gc_state();
 
 #ifdef Py_GIL_DISABLED
@@ -236,6 +246,9 @@ gc_get_count_impl(PyObject *module)
                          _Py_atomic_load_int_relaxed(&gcstate->young.count),
                          gcstate->old[0].count,
                          gcstate->old[1].count);
+#endif
+#else
+    return Py_BuildValue("(iii)", 0, 0, 0);
 #endif
 }
 
@@ -368,6 +381,7 @@ static PyObject *
 gc_get_stats_impl(PyObject *module)
 /*[clinic end generated code: output=a8ab1d8a5d26f3ab input=1ef4ed9d17b1a470]*/
 {
+#if !defined(Py_TRACING_GC)
     int i;
     struct gc_generation_stats stats[NUM_GENERATIONS], *st;
 
@@ -405,6 +419,9 @@ gc_get_stats_impl(PyObject *module)
 error:
     Py_XDECREF(result);
     return NULL;
+#else
+    return PyList_New(0);
+#endif
 }
 
 
@@ -542,6 +559,7 @@ static PyMethodDef GcMethods[] = {
 static int
 gcmodule_exec(PyObject *module)
 {
+#if !defined(Py_TRACING_GC)
     GCState *gcstate = get_gc_state();
 
     /* garbage and callbacks are initialized by _PyGC_Init() early in
@@ -563,6 +581,10 @@ gcmodule_exec(PyObject *module)
     ADD_INT(DEBUG_LEAK);
 #undef ADD_INT
     return 0;
+#else
+    (void)module;
+    return 0;
+#endif
 }
 
 static PyModuleDef_Slot gcmodule_slots[] = {
