@@ -10,7 +10,7 @@
 | 任务 | 状态 | 完成日期 | 备注 |
 |------|------|---------|------|
 | 0.0 测试桩+构建基线+回归框架 | ✅ 已完成 | 2026-06-27 | 7 桩函数，双模式编译通过 |
-| 0.1 编译开关定义 | ✅ 已完成 | 2026-06-27 | PCbuild + pyport.h + Makefile |
+| 0.1 编译开关定义 | ✅ 已完成 | 2026-06-27 | PCbuild + pyport.h + Makefile + `--with-tracing-gc` + AC_SUBST (2026-06-27 追加) |
 | 0.2 PyObject 结构体改造 | ✅ 已完成 | 2026-06-27 | object.h struct _object 重定义 |
 | 0.3 GC 运行时状态 | ✅ 已完成 | 2026-06-27 | struct _gc_runtime_state 重定义（3 分支），GC 颜色常量+访问器，13 新增桩函数，gcmodule.c 5函数守卫，refcount.h/pycore_object.h 顶层守卫，_PyGC_DEFAULT_* 常量 |
 | 0.4 对象堆初始化 | ⬜ 待开始 | — | — |
@@ -69,6 +69,7 @@
 
 > **正在进行的任务**：（无）
 > **最近完成的任务**：
+> - [x] [Task-0.1b] configure 构建系统修复  @2026-06-27  在 configure.ac 中添加 AC_SUBST(TRACING_GC_CFLAGS) 和 --with-tracing-gc 选项，同步更新生成的 configure 脚本。根因：Makefile.pre.in 引用 @TRACING_GC_CFLAGS@ 但 configure 不知晓该变量，导致 CI 所有编译全部失败（字面量被当做文件名传给 gcc）。
 > - [x] [Task-0.3] GC 运行时状态  @2026-06-27  struct _gc_runtime_state 重定义（Py_TRACING_GC 分支含 heap/mark_stack/card_table/switch/stats/incremental 13 字段），_PyGC_COLOR_* 常量+5 访问器，_PyGC_DEFAULT_* 常量，rcount.h/pycore_object.h/pycore_gc.h/pycore_runtime_init.h 顶层守卫，gcmodule.c 5函数 #if 守卫，gc.c 双重守卫，13 新增桩函数，Py_CLEAR 宏 BUG 修复
 > - [x] [Task-0.2] PyObject 结构体改造  @2026-06-27  struct _object 重定义（3 分支），PyObject_HEAD_INIT 适配，端序守卫，static_assert sizeof+offsetof
 > - [x] [Task-0.1] 编译开关定义  @2026-06-27  PCbuild/pyproject.props + pyport.h 互斥守卫 + Makefile.pre.in
