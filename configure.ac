@@ -1800,6 +1800,23 @@ then
   AC_MSG_ERROR([--disable-gil cannot be used with --with-trace-refs])
 fi
 
+AC_MSG_CHECKING([for --with-tracing-gc])
+AC_ARG_WITH([tracing-gc],
+  [AS_HELP_STRING([--with-tracing-gc], [enable tracing garbage collector (experimental, default is no)])],
+  [], [with_tracing_gc=no]
+)
+AC_MSG_RESULT([$with_tracing_gc])
+
+if test "$with_tracing_gc" = "yes"
+then
+  TRACING_GC_CFLAGS="-DPy_TRACING_GC"
+fi
+
+if test "$disable_gil" = "yes" -a "$with_tracing_gc" = "yes";
+then
+  AC_MSG_ERROR([--disable-gil cannot be used with --with-tracing-gc])
+fi
+
 # Check for --enable-pystats
 AC_MSG_CHECKING([for --enable-pystats])
 AC_ARG_ENABLE([pystats],
@@ -2525,6 +2542,7 @@ AS_CASE([$enable_wasm_dynamic_linking],
 
 AC_SUBST([BASECFLAGS])
 AC_SUBST([CFLAGS_NODIST])
+AC_SUBST([TRACING_GC_CFLAGS])
 AC_SUBST([LDFLAGS_NODIST])
 AC_SUBST([EXE_LDFLAGS])
 AC_SUBST([LDFLAGS_NOLTO])

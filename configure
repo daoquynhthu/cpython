@@ -924,6 +924,7 @@ LDFLAGS_NOLTO
 EXE_LDFLAGS
 LDFLAGS_NODIST
 CFLAGS_NODIST
+TRACING_GC_CFLAGS
 BASECFLAGS
 CFLAGS_ALIASING
 OPT
@@ -1910,6 +1911,8 @@ Optional Packages:
   --with-pydebug          build with Py_DEBUG defined (default is no)
   --with-trace-refs       enable tracing references for debugging purpose
                           (default is no)
+  --with-tracing-gc       enable tracing garbage collector (experimental,
+                          default is no)
   --with-assertions       build with C assertions enabled (default is no)
   --with-lto=[full|thin|no|yes]
                           enable Link-Time-Optimization in any build (default
@@ -8414,6 +8417,33 @@ fi
 if test "$disable_gil" = "yes" -a "$with_trace_refs" = "yes";
 then
   as_fn_error $? "--disable-gil cannot be used with --with-trace-refs" "$LINENO" 5
+fi
+
+# Check for --with-tracing-gc
+{ printf "%s\n" "$as_me:${as_lineno-$LINENO}: checking for --with-tracing-gc" >&5
+printf %s "checking for --with-tracing-gc... " >&6; }
+
+# Check whether --with-tracing-gc was given.
+if test ${with_tracing_gc+y}
+then :
+  withval=$with_tracing_gc;
+else case e in #(
+  e) with_tracing_gc=no
+ ;;
+esac
+fi
+
+{ printf "%s\n" "$as_me:${as_lineno-$LINENO}: result: $with_tracing_gc" >&5
+printf %s "$with_tracing_gc" >&6; }
+
+if test "$with_tracing_gc" = "yes"
+then
+  TRACING_GC_CFLAGS="-DPy_TRACING_GC"
+fi
+
+if test "$disable_gil" = "yes" -a "$with_tracing_gc" = "yes";
+then
+  as_fn_error $? "--disable-gil cannot be used with --with-tracing-gc" "$LINENO" 5
 fi
 
 # Check for --enable-pystats
